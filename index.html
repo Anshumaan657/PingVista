@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>API Pulse Monitor</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Developer dashboard</p>
+          <h1>API Pulse Monitor</h1>
+          <p class="subhead">
+            Track endpoint health, response time, uptime, and failures from one
+            compact browser dashboard.
+          </p>
+        </div>
+        <div class="hero-actions">
+          <button class="primary" id="checkAllButton" type="button">
+            Check all
+          </button>
+          <button class="secondary" id="resetButton" type="button">
+            Reset demo data
+          </button>
+        </div>
+      </section>
+
+      <section class="metrics" aria-label="API summary metrics">
+        <article>
+          <span>Tracked APIs</span>
+          <strong id="metricTotal">0</strong>
+        </article>
+        <article>
+          <span>Healthy</span>
+          <strong id="metricHealthy">0</strong>
+        </article>
+        <article>
+          <span>Avg latency</span>
+          <strong id="metricLatency">--</strong>
+        </article>
+        <article>
+          <span>Uptime</span>
+          <strong id="metricUptime">--</strong>
+        </article>
+      </section>
+
+      <section class="workspace">
+        <aside class="panel">
+          <h2>Add endpoint</h2>
+          <form id="endpointForm">
+            <label>
+              API name
+              <input
+                id="endpointName"
+                type="text"
+                placeholder="GitHub API"
+                autocomplete="off"
+                required
+              />
+            </label>
+            <label>
+              URL
+              <input
+                id="endpointUrl"
+                type="url"
+                placeholder="https://api.github.com"
+                autocomplete="off"
+                required
+              />
+            </label>
+            <label>
+              Timeout
+              <select id="endpointTimeout">
+                <option value="3000">3 seconds</option>
+                <option value="5000" selected>5 seconds</option>
+                <option value="8000">8 seconds</option>
+              </select>
+            </label>
+            <button class="primary wide" type="submit">Add endpoint</button>
+          </form>
+        </aside>
+
+        <section class="monitor">
+          <div class="section-heading">
+            <div>
+              <h2>Live endpoints</h2>
+              <p id="lastUpdated">No checks yet</p>
+            </div>
+            <div class="legend" aria-label="Status legend">
+              <span><i class="dot healthy"></i>Healthy</span>
+              <span><i class="dot slow"></i>Slow</span>
+              <span><i class="dot down"></i>Down</span>
+            </div>
+          </div>
+          <div class="endpoint-grid" id="endpointGrid"></div>
+        </section>
+      </section>
+    </main>
+
+    <template id="endpointTemplate">
+      <article class="endpoint-card">
+        <div class="card-top">
+          <div>
+            <h3 class="endpoint-title"></h3>
+            <a class="endpoint-url" target="_blank" rel="noreferrer"></a>
+          </div>
+          <span class="status-pill">Unknown</span>
+        </div>
+        <div class="stats-row">
+          <div>
+            <span>Latency</span>
+            <strong class="latency-value">--</strong>
+          </div>
+          <div>
+            <span>Uptime</span>
+            <strong class="uptime-value">--</strong>
+          </div>
+          <div>
+            <span>Last code</span>
+            <strong class="code-value">--</strong>
+          </div>
+        </div>
+        <div class="chart" aria-label="Recent latency chart"></div>
+        <p class="message"></p>
+        <div class="card-actions">
+          <button class="secondary check-one" type="button">Check</button>
+          <button class="ghost remove-one" type="button">Remove</button>
+        </div>
+      </article>
+    </template>
+
+    <script src="script.js"></script>
+  </body>
+</html>

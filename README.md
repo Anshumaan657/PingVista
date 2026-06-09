@@ -1,4 +1,4 @@
-# API Pulse Monitor
+# PingVista
 
 A small frontend-only API performance monitor that checks endpoint health, response time, uptime, and recent latency history.
 

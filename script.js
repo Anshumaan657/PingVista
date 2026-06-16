@@ -1,73 +1,200 @@
-const STORAGE_KEY = "api-pulse-monitor-v1";
-const HISTORY_LIMIT = 10;
-const SLOW_THRESHOLD_MS = 900;
+const STORAGE_KEY = "api-pulse-monitor-v3";
+const LEGACY_KEYS = ["api-pulse-monitor-v2", "api-pulse-monitor-v1"];
+const HISTORY_LIMIT = 30;
+const DEFAULT_SLOW_THRESHOLD_MS = 900;
+const DEFAULT_EXPECTED_STATUS = 200;
+const DEFAULT_GROUPS = ["Production", "Staging", "Development"];
+const BODY_METHODS = ["POST", "PUT", "PATCH"];
 
 const seedEndpoints = [
   {
     id: crypto.randomUUID(),
     name: "GitHub API",
     url: "https://api.github.com",
+    method: "GET",
+    group: "Production",
     timeout: 5000,
+    expectedStatus: 200,
+    slowThreshold: 900,
+    headersText: "Accept: application/json",
+    bodyText: "",
+    validationText: "current_user_url",
     history: []
   },
   {
     id: crypto.randomUUID(),
     name: "JSONPlaceholder",
     url: "https://jsonplaceholder.typicode.com/posts",
+    method: "GET",
+    group: "Staging",
     timeout: 5000,
+    expectedStatus: 200,
+    slowThreshold: 900,
+    headersText: "",
+    bodyText: "",
+    validationText: "userId",
     history: []
   }
 ];
 
 const elements = {
   form: document.querySelector("#endpointForm"),
+  formTitle: document.querySelector("#formTitle"),
+  editingId: document.querySelector("#editingId"),
   name: document.querySelector("#endpointName"),
   url: document.querySelector("#endpointUrl"),
+  method: document.querySelector("#endpointMethod"),
+  group: document.querySelector("#endpointGroup"),
   timeout: document.querySelector("#endpointTimeout"),
+  expectedStatus: document.querySelector("#expectedStatus"),
+  slowThreshold: document.querySelector("#slowThreshold"),
+  headers: document.querySelector("#endpointHeaders"),
+  body: document.querySelector("#endpointBody"),
+  validationText: document.querySelector("#validationText"),
+  formError: document.querySelector("#formError"),
+  saveEndpointButton: document.querySelector("#saveEndpointButton"),
+  cancelEdit: document.querySelector("#cancelEditButton"),
+  tabs: document.querySelectorAll(".tab"),
+  panels: document.querySelectorAll(".tab-panel"),
+  search: document.querySelector("#searchInput"),
+  statusFilter: document.querySelector("#statusFilter"),
+  groupFilter: document.querySelector("#groupFilter"),
   grid: document.querySelector("#endpointGrid"),
+  groupGrid: document.querySelector("#groupGrid"),
+  endpointTable: document.querySelector("#endpointTable"),
+  incidentList: document.querySelector("#incidentList"),
+  reportGrid: document.querySelector("#reportGrid"),
   template: document.querySelector("#endpointTemplate"),
   checkAll: document.querySelector("#checkAllButton"),
+  exportCsv: document.querySelector("#exportCsvButton"),
+  exportJson: document.querySelector("#exportJsonButton"),
+  importJson: document.querySelector("#importJsonInput"),
   reset: document.querySelector("#resetButton"),
+  monitorToggle: document.querySelector("#monitorToggle"),
+  monitorInterval: document.querySelector("#monitorInterval"),
+  monitoringStatus: document.querySelector("#monitoringStatus"),
   lastUpdated: document.querySelector("#lastUpdated"),
   metricTotal: document.querySelector("#metricTotal"),
   metricHealthy: document.querySelector("#metricHealthy"),
   metricLatency: document.querySelector("#metricLatency"),
-  metricUptime: document.querySelector("#metricUptime")
+  metricIncidents: document.querySelector("#metricIncidents"),
+  storageSummary: document.querySelector("#storageSummary"),
+  detailModal: document.querySelector("#detailModal"),
+  detailTitle: document.querySelector("#detailTitle"),
+  detailContent: document.querySelector("#detailContent"),
+  closeDetail: document.querySelector("#closeDetailButton")
 };
 
-let endpoints = loadEndpoints();
+let state = loadState();
+let endpoints = state.endpoints;
+let incidents = state.incidents;
+let monitorTimer = null;
+let countdownTimer = null;
+let nextCheckAt = null;
 
-function loadEndpoints() {
+function syncStateRefs() {
+  endpoints = state.endpoints;
+  incidents = state.incidents;
+}
+
+function createSeedState() {
+  return {
+    endpoints: seedEndpoints.map(normalizeEndpoint),
+    incidents: []
+  };
+}
+
+function loadState() {
   const saved = localStorage.getItem(STORAGE_KEY);
+  const legacy = LEGACY_KEYS.map((key) => localStorage.getItem(key)).find(Boolean);
+  const raw = saved || legacy;
 
-  if (!saved) {
-    return seedEndpoints;
+  if (!raw) {
+    return createSeedState();
   }
 
   try {
-    const parsed = JSON.parse(saved);
-    return Array.isArray(parsed) ? parsed : seedEndpoints;
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return {
+        endpoints: parsed.map(normalizeEndpoint),
+        incidents: []
+      };
+    }
+
+    return {
+      endpoints: Array.isArray(parsed.endpoints)
+        ? parsed.endpoints.map(normalizeEndpoint)
+        : createSeedState().endpoints,
+      incidents: Array.isArray(parsed.incidents)
+        ? parsed.incidents.map(normalizeIncident)
+        : []
+    };
   } catch {
-    return seedEndpoints;
+    return createSeedState();
   }
 }
 
-function saveEndpoints() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(endpoints));
+function saveState() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function normalizeEndpoint(endpoint) {
+  return {
+    id: endpoint.id || crypto.randomUUID(),
+    name: endpoint.name || "Untitled API",
+    url: endpoint.url || "",
+    method: (endpoint.method || "GET").toUpperCase(),
+    group: endpoint.group || "Production",
+    timeout: Number(endpoint.timeout) || 5000,
+    expectedStatus: Number(endpoint.expectedStatus) || DEFAULT_EXPECTED_STATUS,
+    slowThreshold: Number(endpoint.slowThreshold) || DEFAULT_SLOW_THRESHOLD_MS,
+    headersText: endpoint.headersText || "",
+    bodyText: endpoint.bodyText || "",
+    validationText: endpoint.validationText || "",
+    history: Array.isArray(endpoint.history)
+      ? endpoint.history.slice(-HISTORY_LIMIT)
+      : []
+  };
+}
+
+function normalizeIncident(incident) {
+  return {
+    id: incident.id || crypto.randomUUID(),
+    endpointId: incident.endpointId,
+    endpointName: incident.endpointName || "Unknown endpoint",
+    group: incident.group || "Production",
+    status: incident.status === "resolved" ? "resolved" : "open",
+    startedAt: incident.startedAt || new Date().toISOString(),
+    resolvedAt: incident.resolvedAt || null,
+    message: incident.message || "Endpoint failed.",
+    checks: Number(incident.checks) || 1
+  };
 }
 
 function formatLatency(value) {
   return Number.isFinite(value) ? `${Math.round(value)} ms` : "--";
 }
 
+function formatDateTime(value) {
+  if (!value) return "--";
+  return new Date(value).toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  });
+}
+
 function getLatest(endpoint) {
   return endpoint.history.at(-1);
 }
 
-function getStatus(result) {
+function getStatus(endpoint, result = getLatest(endpoint)) {
   if (!result) return "unknown";
   if (!result.ok) return "down";
-  if (result.latency > SLOW_THRESHOLD_MS) return "slow";
+  if (result.latency > endpoint.slowThreshold) return "slow";
   return "healthy";
 }
 
@@ -82,7 +209,6 @@ function statusLabel(status) {
 
 function endpointUptime(endpoint) {
   if (!endpoint.history.length) return null;
-
   const successes = endpoint.history.filter((item) => item.ok).length;
   return Math.round((successes / endpoint.history.length) * 100);
 }
@@ -90,70 +216,236 @@ function endpointUptime(endpoint) {
 function averageLatency(results) {
   const successful = results.filter((item) => item.ok && Number.isFinite(item.latency));
   if (!successful.length) return null;
+  return Math.round(successful.reduce((sum, item) => sum + item.latency, 0) / successful.length);
+}
 
-  const total = successful.reduce((sum, item) => sum + item.latency, 0);
-  return Math.round(total / successful.length);
+function allGroups() {
+  return Array.from(new Set(DEFAULT_GROUPS.concat(endpoints.map((endpoint) => endpoint.group))));
+}
+
+function parseHeaders(headersText) {
+  const headers = {};
+  const lines = headersText.split("\n").map((line) => line.trim()).filter(Boolean);
+
+  for (const line of lines) {
+    const index = line.indexOf(":");
+    if (index === -1) {
+      throw new Error(`Header "${line}" must use Key: Value format.`);
+    }
+
+    const key = line.slice(0, index).trim();
+    const value = line.slice(index + 1).trim();
+    if (!key || !value) {
+      throw new Error(`Header "${line}" must include both key and value.`);
+    }
+
+    headers[key] = value;
+  }
+
+  return headers;
+}
+
+function validateBody(method, bodyText) {
+  if (!bodyText.trim()) return "";
+  if (!BODY_METHODS.includes(method)) {
+    throw new Error("JSON body is only used for POST, PUT, and PATCH requests.");
+  }
+
+  JSON.parse(bodyText);
+  return bodyText.trim();
+}
+
+function buildEndpointFromForm() {
+  const method = elements.method.value.toUpperCase();
+  parseHeaders(elements.headers.value);
+  validateBody(method, elements.body.value);
+
+  return normalizeEndpoint({
+    id: elements.editingId.value || crypto.randomUUID(),
+    name: elements.name.value.trim(),
+    url: elements.url.value.trim(),
+    method,
+    group: elements.group.value,
+    timeout: Number(elements.timeout.value),
+    expectedStatus: Number(elements.expectedStatus.value),
+    slowThreshold: Number(elements.slowThreshold.value),
+    headersText: elements.headers.value.trim(),
+    bodyText: elements.body.value.trim(),
+    validationText: elements.validationText.value.trim(),
+    history: elements.editingId.value
+      ? endpoints.find((endpoint) => endpoint.id === elements.editingId.value)?.history || []
+      : []
+  });
+}
+
+function filteredEndpoints() {
+  const query = elements.search.value.trim().toLowerCase();
+  const status = elements.statusFilter.value;
+  const group = elements.groupFilter.value;
+
+  return endpoints.filter((endpoint) => {
+    const matchesText =
+      !query ||
+      endpoint.name.toLowerCase().includes(query) ||
+      endpoint.url.toLowerCase().includes(query) ||
+      endpoint.group.toLowerCase().includes(query);
+    const matchesStatus = status === "all" || getStatus(endpoint) === status;
+    const matchesGroup = group === "all" || endpoint.group === group;
+
+    return matchesText && matchesStatus && matchesGroup;
+  });
+}
+
+function renderAll() {
+  renderGroupOptions();
+  renderMetrics();
+  renderGroups();
+  renderEndpoints();
+  renderEndpointTable();
+  renderIncidents();
+  renderReports();
+  renderStorageSummary();
+}
+
+function renderGroupOptions() {
+  const selected = elements.groupFilter.value || "all";
+  elements.groupFilter.innerHTML = '<option value="all">All groups</option>';
+
+  allGroups().forEach((group) => {
+    const option = document.createElement("option");
+    option.value = group;
+    option.textContent = group;
+    elements.groupFilter.append(option);
+  });
+
+  elements.groupFilter.value = allGroups().includes(selected) ? selected : "all";
 }
 
 function renderMetrics() {
   const latestResults = endpoints.map(getLatest).filter(Boolean);
-  const healthy = latestResults.filter((item) => getStatus(item) === "healthy").length;
+  const healthy = endpoints.filter((endpoint) => getStatus(endpoint) === "healthy").length;
   const checks = endpoints.flatMap((endpoint) => endpoint.history);
-  const successfulChecks = checks.filter((item) => item.ok).length;
-  const uptime = checks.length ? Math.round((successfulChecks / checks.length) * 100) : null;
   const latency = averageLatency(checks);
+  const openIncidents = incidents.filter((incident) => incident.status === "open").length;
 
   elements.metricTotal.textContent = endpoints.length;
-  elements.metricHealthy.textContent = healthy;
+  elements.metricHealthy.textContent = latestResults.length ? healthy : 0;
   elements.metricLatency.textContent = latency ? `${latency} ms` : "--";
-  elements.metricUptime.textContent = uptime === null ? "--" : `${uptime}%`;
+  elements.metricIncidents.textContent = openIncidents;
 }
 
-function renderChart(container, history) {
-  container.textContent = "";
-  const recent = history.slice(-HISTORY_LIMIT);
-  const maxLatency = Math.max(300, ...recent.map((item) => item.latency || 0));
-  const padded = Array.from({ length: HISTORY_LIMIT - recent.length }, () => null).concat(recent);
+function renderGroups() {
+  elements.groupGrid.textContent = "";
 
-  padded.forEach((item) => {
-    const bar = document.createElement("span");
-    bar.className = "bar";
+  allGroups().forEach((group) => {
+    const groupEndpoints = endpoints.filter((endpoint) => endpoint.group === group);
+    if (!groupEndpoints.length) return;
 
-    if (!item) {
-      bar.style.height = "4px";
-      bar.style.opacity = "0.2";
-    } else {
-      bar.style.height = `${Math.max(8, (item.latency / maxLatency) * 100)}%`;
-      bar.title = item.ok ? formatLatency(item.latency) : item.message;
-
-      if (!item.ok) {
-        bar.classList.add("down");
-      }
-    }
-
-    container.append(bar);
+    const open = incidents.filter(
+      (incident) => incident.group === group && incident.status === "open"
+    ).length;
+    const healthy = groupEndpoints.filter((endpoint) => getStatus(endpoint) === "healthy").length;
+    const card = document.createElement("article");
+    card.className = "group-card";
+    card.innerHTML = `
+      <span>${group}</span>
+      <strong>${healthy}/${groupEndpoints.length}</strong>
+      <p>${open} open incident${open === 1 ? "" : "s"}</p>
+    `;
+    elements.groupGrid.append(card);
   });
+}
+
+function chartPoint(index, item, history, maxLatency) {
+  const x = history.length === 1 ? 50 : (index / (history.length - 1)) * 100;
+  const value = Math.min(item.latency || 0, maxLatency);
+  const y = 86 - (value / maxLatency) * 72;
+  return { x, y };
+}
+
+function renderChart(container, endpoint) {
+  const history = endpoint.history.slice(-HISTORY_LIMIT);
+  container.textContent = "";
+
+  if (!history.length) {
+    const empty = document.createElement("span");
+    empty.className = "chart-empty";
+    empty.textContent = "No checks yet";
+    container.append(empty);
+    return;
+  }
+
+  const maxLatency = Math.max(
+    endpoint.slowThreshold,
+    300,
+    ...history.map((item) => item.latency || 0)
+  );
+  const points = history.map((item, index) => chartPoint(index, item, history, maxLatency));
+  const linePath = points
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
+    .join(" ");
+  const thresholdY = 86 - (Math.min(endpoint.slowThreshold, maxLatency) / maxLatency) * 72;
+
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 100 100");
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.classList.add("line-chart");
+
+  const threshold = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  threshold.setAttribute("x1", "0");
+  threshold.setAttribute("x2", "100");
+  threshold.setAttribute("y1", thresholdY);
+  threshold.setAttribute("y2", thresholdY);
+  threshold.classList.add("threshold-line");
+  svg.append(threshold);
+
+  const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  line.setAttribute("d", linePath);
+  line.classList.add("latency-line");
+  svg.append(line);
+
+  points.forEach((point, index) => {
+    const result = history[index];
+    const marker = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    marker.setAttribute("cx", point.x);
+    marker.setAttribute("cy", point.y);
+    marker.setAttribute("r", "2.8");
+    marker.classList.add(result.ok ? "point-ok" : "point-down");
+
+    const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+    title.textContent = `${formatDateTime(result.checkedAt)} - ${
+      result.ok ? formatLatency(result.latency) : result.message
+    }`;
+    marker.append(title);
+    svg.append(marker);
+  });
+
+  container.append(svg);
 }
 
 function renderEndpoints() {
   elements.grid.textContent = "";
+  const visibleEndpoints = filteredEndpoints();
 
   if (!endpoints.length) {
-    const empty = document.createElement("div");
-    empty.className = "empty-state";
-    empty.textContent = "Add an API endpoint to start monitoring.";
-    elements.grid.append(empty);
-    renderMetrics();
+    elements.grid.append(emptyState("Add an API endpoint to start monitoring."));
     return;
   }
 
-  endpoints.forEach((endpoint) => {
+  if (!visibleEndpoints.length) {
+    elements.grid.append(emptyState("No endpoints match the current filters."));
+    return;
+  }
+
+  visibleEndpoints.forEach((endpoint) => {
     const latest = getLatest(endpoint);
-    const status = getStatus(latest);
+    const status = getStatus(endpoint, latest);
     const uptime = endpointUptime(endpoint);
     const node = elements.template.content.firstElementChild.cloneNode(true);
 
     node.dataset.id = endpoint.id;
+    node.querySelector(".method-badge").textContent = endpoint.method;
+    node.querySelector(".group-badge").textContent = endpoint.group;
     node.querySelector(".endpoint-title").textContent = endpoint.name;
 
     const link = node.querySelector(".endpoint-url");
@@ -167,17 +459,141 @@ function renderEndpoints() {
     node.querySelector(".latency-value").textContent = latest
       ? formatLatency(latest.latency)
       : "--";
-    node.querySelector(".uptime-value").textContent =
-      uptime === null ? "--" : `${uptime}%`;
+    node.querySelector(".uptime-value").textContent = uptime === null ? "--" : `${uptime}%`;
     node.querySelector(".code-value").textContent = latest?.status || "--";
+    node.querySelector(".expected-code").textContent = `Expected ${endpoint.expectedStatus}`;
+    node.querySelector(".slow-rule").textContent = `Slow > ${endpoint.slowThreshold} ms`;
+    node.querySelector(".validation-rule").textContent = endpoint.validationText
+      ? `Body contains "${endpoint.validationText}"`
+      : "No body rule";
     node.querySelector(".message").textContent =
       latest?.message || "Ready for the first check.";
 
-    renderChart(node.querySelector(".chart"), endpoint.history);
+    renderChart(node.querySelector(".chart"), endpoint);
     elements.grid.append(node);
   });
+}
 
-  renderMetrics();
+function emptyState(message) {
+  const empty = document.createElement("div");
+  empty.className = "empty-state";
+  empty.textContent = message;
+  return empty;
+}
+
+function renderEndpointTable() {
+  elements.endpointTable.textContent = "";
+
+  if (!endpoints.length) {
+    elements.endpointTable.append(emptyState("No endpoints configured."));
+    return;
+  }
+
+  endpoints.forEach((endpoint) => {
+    const latest = getLatest(endpoint);
+    const row = document.createElement("article");
+    row.className = "table-row";
+    row.dataset.id = endpoint.id;
+    row.innerHTML = `
+      <div>
+        <span class="method-badge">${endpoint.method}</span>
+        <span class="group-badge">${endpoint.group}</span>
+        <h3>${endpoint.name}</h3>
+        <p>${endpoint.url}</p>
+      </div>
+      <div>
+        <span>Status</span>
+        <strong>${statusLabel(getStatus(endpoint))}</strong>
+      </div>
+      <div>
+        <span>Rules</span>
+        <strong>${endpoint.expectedStatus} / ${endpoint.slowThreshold} ms</strong>
+      </div>
+      <div>
+        <span>Last check</span>
+        <strong>${latest ? formatDateTime(latest.checkedAt) : "--"}</strong>
+      </div>
+      <div class="row-actions">
+        <button class="secondary detail-one" type="button">Details</button>
+        <button class="secondary edit-one" type="button">Edit</button>
+      </div>
+    `;
+    elements.endpointTable.append(row);
+  });
+}
+
+function renderIncidents() {
+  elements.incidentList.textContent = "";
+  const sorted = incidents
+    .slice()
+    .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt));
+
+  if (!sorted.length) {
+    elements.incidentList.append(emptyState("No incidents yet. Failed checks will appear here."));
+    return;
+  }
+
+  sorted.forEach((incident) => {
+    const item = document.createElement("article");
+    item.className = `incident-item ${incident.status}`;
+    item.innerHTML = `
+      <div>
+        <span class="status-pill ${incident.status === "open" ? "down" : "healthy"}">
+          ${incident.status === "open" ? "Open" : "Resolved"}
+        </span>
+        <h3>${incident.endpointName}</h3>
+        <p>${incident.message}</p>
+      </div>
+      <div>
+        <span>Started</span>
+        <strong>${formatDateTime(incident.startedAt)}</strong>
+      </div>
+      <div>
+        <span>Resolved</span>
+        <strong>${formatDateTime(incident.resolvedAt)}</strong>
+      </div>
+      <div>
+        <span>Checks</span>
+        <strong>${incident.checks}</strong>
+      </div>
+    `;
+    elements.incidentList.append(item);
+  });
+}
+
+function renderReports() {
+  const checks = endpoints.flatMap((endpoint) => endpoint.history);
+  const reportItems = [
+    ["Total checks", checks.length],
+    ["Failed checks", checks.filter((check) => !check.ok).length],
+    ["Validated endpoints", endpoints.filter((endpoint) => endpoint.validationText).length],
+    ["Open incidents", incidents.filter((incident) => incident.status === "open").length],
+    ["Resolved incidents", incidents.filter((incident) => incident.status === "resolved").length],
+    ["Groups", allGroups().filter((group) => endpoints.some((endpoint) => endpoint.group === group)).length]
+  ];
+
+  elements.reportGrid.textContent = "";
+  reportItems.forEach(([label, value]) => {
+    const item = document.createElement("article");
+    item.className = "report-card";
+    item.innerHTML = `<span>${label}</span><strong>${value}</strong>`;
+    elements.reportGrid.append(item);
+  });
+}
+
+function renderStorageSummary() {
+  const bytes = new Blob([JSON.stringify(state)]).size;
+  elements.storageSummary.textContent = `${endpoints.length} endpoints, ${incidents.length} incidents, ${bytes} bytes saved`;
+}
+
+function validateResponseBody(endpoint, bodyText) {
+  if (!endpoint.validationText) {
+    return { ok: true, message: "" };
+  }
+
+  return bodyText.includes(endpoint.validationText)
+    ? { ok: true, message: `Body matched "${endpoint.validationText}".` }
+    : { ok: false, message: `Body did not contain "${endpoint.validationText}".` };
 }
 
 async function pingEndpoint(endpoint) {
@@ -186,38 +602,91 @@ async function pingEndpoint(endpoint) {
   const startedAt = performance.now();
 
   try {
-    const response = await fetch(endpoint.url, {
+    const headers = parseHeaders(endpoint.headersText);
+    const options = {
       cache: "no-store",
+      method: endpoint.method,
       mode: "cors",
-      signal: controller.signal
-    });
+      signal: controller.signal,
+      headers
+    };
+
+    if (BODY_METHODS.includes(endpoint.method) && endpoint.bodyText.trim()) {
+      options.body = endpoint.bodyText.trim();
+      if (!Object.keys(headers).some((key) => key.toLowerCase() === "content-type")) {
+        options.headers["Content-Type"] = "application/json";
+      }
+    }
+
+    const response = await fetch(endpoint.url, options);
+    const bodyText = await response.text();
     const latency = performance.now() - startedAt;
+    const statusMatches = response.status === endpoint.expectedStatus;
+    const validation = validateResponseBody(endpoint, bodyText);
+    const ok = response.ok && statusMatches && validation.ok;
 
     return {
       checkedAt: new Date().toISOString(),
-      ok: response.ok,
+      ok,
       latency,
       status: response.status,
-      message: response.ok
-        ? `Responded in ${Math.round(latency)} ms.`
-        : `Returned HTTP ${response.status}.`
+      validationOk: validation.ok,
+      message: ok
+        ? `Responded in ${Math.round(latency)} ms. ${validation.message}`.trim()
+        : statusMatches
+          ? validation.message || `Returned HTTP ${response.status}.`
+          : `Expected HTTP ${endpoint.expectedStatus}, got ${response.status}.`
     };
   } catch (error) {
     const latency = performance.now() - startedAt;
     const message =
       error.name === "AbortError"
         ? `Timed out after ${endpoint.timeout / 1000} seconds.`
-        : "Request failed or was blocked by CORS.";
+        : error.message || "Request failed or was blocked by CORS.";
 
     return {
       checkedAt: new Date().toISOString(),
       ok: false,
       latency,
       status: "ERR",
+      validationOk: false,
       message
     };
   } finally {
     window.clearTimeout(timeout);
+  }
+}
+
+function updateIncident(endpoint, result) {
+  const openIncident = incidents.find(
+    (incident) => incident.endpointId === endpoint.id && incident.status === "open"
+  );
+
+  if (!result.ok) {
+    if (openIncident) {
+      openIncident.message = result.message;
+      openIncident.checks += 1;
+    } else {
+      incidents.unshift(
+        normalizeIncident({
+          id: crypto.randomUUID(),
+          endpointId: endpoint.id,
+          endpointName: endpoint.name,
+          group: endpoint.group,
+          status: "open",
+          startedAt: result.checkedAt,
+          message: result.message,
+          checks: 1
+        })
+      );
+    }
+    return;
+  }
+
+  if (openIncident) {
+    openIncident.status = "resolved";
+    openIncident.resolvedAt = result.checkedAt;
+    openIncident.message = `Recovered after ${openIncident.checks} failed check${openIncident.checks === 1 ? "" : "s"}.`;
   }
 }
 
@@ -230,10 +699,11 @@ async function checkEndpoint(id) {
 
   const result = await pingEndpoint(endpoint);
   endpoint.history = endpoint.history.concat(result).slice(-HISTORY_LIMIT);
+  updateIncident(endpoint, result);
   elements.lastUpdated.textContent = `Last checked ${new Date().toLocaleTimeString()}`;
 
-  saveEndpoints();
-  renderEndpoints();
+  saveState();
+  renderAll();
 }
 
 async function checkAllEndpoints() {
@@ -242,45 +712,307 @@ async function checkAllEndpoints() {
   elements.checkAll.classList.remove("is-checking");
 }
 
-elements.form.addEventListener("submit", (event) => {
-  event.preventDefault();
+function updateMonitoringStatus() {
+  if (!monitorTimer || !nextCheckAt) {
+    elements.monitoringStatus.textContent = "Paused";
+    elements.monitorToggle.textContent = "Start";
+    return;
+  }
 
-  endpoints.unshift({
-    id: crypto.randomUUID(),
-    name: elements.name.value.trim(),
-    url: elements.url.value.trim(),
-    timeout: Number(elements.timeout.value),
-    history: []
+  const seconds = Math.max(0, Math.ceil((nextCheckAt - Date.now()) / 1000));
+  elements.monitoringStatus.textContent = `Running - next check in ${seconds}s`;
+  elements.monitorToggle.textContent = "Pause";
+}
+
+function scheduleNextCheck() {
+  window.clearTimeout(monitorTimer);
+  const interval = Number(elements.monitorInterval.value);
+  nextCheckAt = Date.now() + interval;
+  updateMonitoringStatus();
+
+  monitorTimer = window.setTimeout(async () => {
+    await checkAllEndpoints();
+    scheduleNextCheck();
+  }, interval);
+}
+
+function startMonitoring() {
+  if (monitorTimer) return;
+  checkAllEndpoints();
+  scheduleNextCheck();
+  countdownTimer = window.setInterval(updateMonitoringStatus, 1000);
+}
+
+function stopMonitoring() {
+  window.clearTimeout(monitorTimer);
+  window.clearInterval(countdownTimer);
+  monitorTimer = null;
+  countdownTimer = null;
+  nextCheckAt = null;
+  updateMonitoringStatus();
+}
+
+function setActiveTab(tabName) {
+  elements.tabs.forEach((tab) => {
+    tab.classList.toggle("active", tab.dataset.tab === tabName);
+  });
+  elements.panels.forEach((panel) => {
+    panel.classList.toggle("active", panel.id === `${tabName}Panel`);
+  });
+}
+
+function resetForm() {
+  elements.form.reset();
+  elements.editingId.value = "";
+  elements.formTitle.textContent = "Add endpoint";
+  elements.saveEndpointButton.textContent = "Add endpoint";
+  elements.cancelEdit.style.display = "none";
+  elements.timeout.value = "5000";
+  elements.method.value = "GET";
+  elements.group.value = "Production";
+  elements.expectedStatus.value = DEFAULT_EXPECTED_STATUS;
+  elements.slowThreshold.value = DEFAULT_SLOW_THRESHOLD_MS;
+  elements.formError.textContent = "";
+}
+
+function editEndpoint(id) {
+  const endpoint = endpoints.find((item) => item.id === id);
+  if (!endpoint) return;
+
+  setActiveTab("overview");
+  elements.editingId.value = endpoint.id;
+  elements.name.value = endpoint.name;
+  elements.url.value = endpoint.url;
+  elements.method.value = endpoint.method;
+  elements.group.value = endpoint.group;
+  elements.timeout.value = String(endpoint.timeout);
+  elements.expectedStatus.value = endpoint.expectedStatus;
+  elements.slowThreshold.value = endpoint.slowThreshold;
+  elements.headers.value = endpoint.headersText;
+  elements.body.value = endpoint.bodyText;
+  elements.validationText.value = endpoint.validationText;
+  elements.formTitle.textContent = "Edit endpoint";
+  elements.saveEndpointButton.textContent = "Save changes";
+  elements.cancelEdit.style.display = "block";
+  elements.formError.textContent = "";
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function showDetails(id) {
+  const endpoint = endpoints.find((item) => item.id === id);
+  if (!endpoint) return;
+
+  const latest = getLatest(endpoint);
+  const endpointIncidents = incidents.filter((incident) => incident.endpointId === endpoint.id);
+  elements.detailTitle.textContent = endpoint.name;
+  elements.detailContent.innerHTML = `
+    <article>
+      <span>Configuration</span>
+      <strong>${endpoint.method} ${endpoint.url}</strong>
+      <p>${endpoint.group} · Expected ${endpoint.expectedStatus} · Slow after ${endpoint.slowThreshold} ms</p>
+    </article>
+    <article>
+      <span>Validation</span>
+      <strong>${endpoint.validationText || "No body validation"}</strong>
+      <p>${endpoint.headersText ? "Custom headers configured" : "No custom headers"}</p>
+    </article>
+    <article>
+      <span>Latest result</span>
+      <strong>${statusLabel(getStatus(endpoint))}</strong>
+      <p>${latest?.message || "No checks yet"}</p>
+    </article>
+    <article>
+      <span>Incidents</span>
+      <strong>${endpointIncidents.length}</strong>
+      <p>${endpointIncidents.filter((incident) => incident.status === "open").length} currently open</p>
+    </article>
+    <article class="wide-detail">
+      <span>Recent checks</span>
+      <div class="history-list">
+        ${
+          endpoint.history
+            .slice()
+            .reverse()
+            .slice(0, 8)
+            .map(
+              (item) =>
+                `<p><strong>${item.ok ? "OK" : "FAIL"}</strong> ${formatDateTime(item.checkedAt)} · ${formatLatency(item.latency)} · ${item.message}</p>`
+            )
+            .join("") || "<p>No checks recorded yet.</p>"
+        }
+      </div>
+    </article>
+  `;
+  elements.detailModal.showModal();
+}
+
+function removeEndpoint(id) {
+  state.endpoints = endpoints.filter((endpoint) => endpoint.id !== id);
+  state.incidents = incidents.filter((incident) => incident.endpointId !== id);
+  syncStateRefs();
+  saveState();
+  renderAll();
+}
+
+function escapeCsv(value) {
+  const text = String(value ?? "");
+  return `"${text.replaceAll('"', '""')}"`;
+}
+
+function downloadText(filename, text, type) {
+  const blob = new Blob([text], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportCsv() {
+  const rows = [
+    [
+      "name",
+      "group",
+      "method",
+      "url",
+      "status",
+      "latency_ms",
+      "uptime_percent",
+      "last_code",
+      "expected_code",
+      "slow_threshold_ms",
+      "checked_at",
+      "message"
+    ]
+  ];
+
+  endpoints.forEach((endpoint) => {
+    const latest = getLatest(endpoint);
+    rows.push([
+      endpoint.name,
+      endpoint.group,
+      endpoint.method,
+      endpoint.url,
+      statusLabel(getStatus(endpoint)),
+      latest ? Math.round(latest.latency) : "",
+      endpointUptime(endpoint) ?? "",
+      latest?.status ?? "",
+      endpoint.expectedStatus,
+      endpoint.slowThreshold,
+      latest?.checkedAt ?? "",
+      latest?.message ?? "No checks yet"
+    ]);
   });
 
-  elements.form.reset();
-  elements.timeout.value = "5000";
-  saveEndpoints();
-  renderEndpoints();
+  const csv = rows.map((row) => row.map(escapeCsv).join(",")).join("\n");
+  downloadText(`pingvista-report-${new Date().toISOString().slice(0, 10)}.csv`, csv, "text/csv;charset=utf-8");
+}
+
+function exportJson() {
+  downloadText(
+    `pingvista-backup-${new Date().toISOString().slice(0, 10)}.json`,
+    JSON.stringify(state, null, 2),
+    "application/json;charset=utf-8"
+  );
+}
+
+function importJson(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.addEventListener("load", () => {
+    try {
+      const parsed = JSON.parse(reader.result);
+      state = {
+        endpoints: Array.isArray(parsed.endpoints)
+          ? parsed.endpoints.map(normalizeEndpoint)
+          : [],
+        incidents: Array.isArray(parsed.incidents)
+          ? parsed.incidents.map(normalizeIncident)
+          : []
+      };
+      syncStateRefs();
+      stopMonitoring();
+      saveState();
+      resetForm();
+      renderAll();
+    } catch {
+      window.alert("That JSON file could not be imported.");
+    }
+  });
+  reader.readAsText(file);
+}
+
+elements.form.addEventListener("submit", (event) => {
+  event.preventDefault();
+  elements.formError.textContent = "";
+
+  try {
+    const endpoint = buildEndpointFromForm();
+    const index = endpoints.findIndex((item) => item.id === endpoint.id);
+
+    if (index === -1) {
+      state.endpoints.unshift(endpoint);
+    } else {
+      state.endpoints[index] = endpoint;
+    }
+
+    saveState();
+    resetForm();
+    renderAll();
+  } catch (error) {
+    elements.formError.textContent = error.message;
+  }
 });
 
-elements.grid.addEventListener("click", (event) => {
-  const card = event.target.closest(".endpoint-card");
-  if (!card) return;
-
-  if (event.target.matches(".check-one")) {
-    checkEndpoint(card.dataset.id);
-  }
-
-  if (event.target.matches(".remove-one")) {
-    endpoints = endpoints.filter((endpoint) => endpoint.id !== card.dataset.id);
-    saveEndpoints();
-    renderEndpoints();
-  }
-});
-
+elements.cancelEdit.addEventListener("click", resetForm);
+elements.tabs.forEach((tab) => tab.addEventListener("click", () => setActiveTab(tab.dataset.tab)));
+elements.search.addEventListener("input", renderEndpoints);
+elements.statusFilter.addEventListener("change", renderEndpoints);
+elements.groupFilter.addEventListener("change", renderEndpoints);
 elements.checkAll.addEventListener("click", checkAllEndpoints);
+elements.exportCsv.addEventListener("click", exportCsv);
+elements.exportJson.addEventListener("click", exportJson);
+elements.importJson.addEventListener("change", (event) => importJson(event.target.files[0]));
+elements.monitorInterval.addEventListener("change", () => {
+  if (monitorTimer) scheduleNextCheck();
+});
+
+elements.monitorToggle.addEventListener("click", () => {
+  if (monitorTimer) {
+    stopMonitoring();
+  } else {
+    startMonitoring();
+  }
+});
+
+document.addEventListener("click", (event) => {
+  const action = event.target;
+  const container = action.closest("[data-id]");
+  if (!container) return;
+
+  if (action.matches(".check-one")) checkEndpoint(container.dataset.id);
+  if (action.matches(".detail-one")) showDetails(container.dataset.id);
+  if (action.matches(".edit-one")) editEndpoint(container.dataset.id);
+  if (action.matches(".remove-one")) removeEndpoint(container.dataset.id);
+});
 
 elements.reset.addEventListener("click", () => {
-  endpoints = seedEndpoints.map((endpoint) => ({ ...endpoint, history: [] }));
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(endpoints));
+  stopMonitoring();
+  state = createSeedState();
+  syncStateRefs();
+  saveState();
+  LEGACY_KEYS.forEach((key) => localStorage.removeItem(key));
+  elements.search.value = "";
+  elements.statusFilter.value = "all";
+  elements.groupFilter.value = "all";
   elements.lastUpdated.textContent = "Demo data reset";
-  renderEndpoints();
+  resetForm();
+  renderAll();
 });
 
-renderEndpoints();
+elements.closeDetail.addEventListener("click", () => elements.detailModal.close());
+
+resetForm();
+renderAll();
+updateMonitoringStatus();

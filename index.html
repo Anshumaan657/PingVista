@@ -10,19 +10,25 @@
     <main class="shell">
       <section class="hero">
         <div>
-          <p class="eyebrow">Developer dashboard</p>
+          <p class="eyebrow">Developer monitoring workspace</p>
           <h1>PingVista</h1>
           <p class="subhead">
-            Track endpoint health, response time, uptime, and failures from one
-            compact browser dashboard.
+            Monitor API health, validate responses, track incidents, and manage
+            endpoint environments from one focused dashboard.
           </p>
         </div>
         <div class="hero-actions">
           <button class="primary" id="checkAllButton" type="button">
             Check all
           </button>
+          <button class="secondary" id="exportCsvButton" type="button">
+            Export CSV
+          </button>
+          <button class="secondary" id="exportJsonButton" type="button">
+            Backup JSON
+          </button>
           <button class="secondary" id="resetButton" type="button">
-            Reset demo data
+            Reset demo
           </button>
         </div>
       </section>
@@ -41,68 +47,276 @@
           <strong id="metricLatency">--</strong>
         </article>
         <article>
-          <span>Uptime</span>
-          <strong id="metricUptime">--</strong>
+          <span>Open incidents</span>
+          <strong id="metricIncidents">0</strong>
         </article>
       </section>
 
-      <section class="workspace">
-        <aside class="panel">
-          <h2>Add endpoint</h2>
-          <form id="endpointForm">
-            <label>
-              API name
-              <input
-                id="endpointName"
-                type="text"
-                placeholder="GitHub API"
-                autocomplete="off"
-                required
-              />
-            </label>
-            <label>
-              URL
-              <input
-                id="endpointUrl"
-                type="url"
-                placeholder="https://api.github.com"
-                autocomplete="off"
-                required
-              />
-            </label>
-            <label>
-              Timeout
-              <select id="endpointTimeout">
-                <option value="3000">3 seconds</option>
-                <option value="5000" selected>5 seconds</option>
-                <option value="8000">8 seconds</option>
-              </select>
-            </label>
-            <button class="primary wide" type="submit">Add endpoint</button>
-          </form>
-        </aside>
+      <nav class="tabs" aria-label="Dashboard sections">
+        <button class="tab active" data-tab="overview" type="button">Overview</button>
+        <button class="tab" data-tab="endpoints" type="button">Endpoints</button>
+        <button class="tab" data-tab="incidents" type="button">Incidents</button>
+        <button class="tab" data-tab="reports" type="button">Reports</button>
+        <button class="tab" data-tab="settings" type="button">Settings</button>
+      </nav>
 
-        <section class="monitor">
-          <div class="section-heading">
+      <section class="tab-panel active" id="overviewPanel">
+        <section class="control-strip" aria-label="Monitoring controls">
+          <div class="monitoring-card">
             <div>
-              <h2>Live endpoints</h2>
-              <p id="lastUpdated">No checks yet</p>
+              <h2>Auto monitoring</h2>
+              <p id="monitoringStatus">Paused</p>
             </div>
-            <div class="legend" aria-label="Status legend">
-              <span><i class="dot healthy"></i>Healthy</span>
-              <span><i class="dot slow"></i>Slow</span>
-              <span><i class="dot down"></i>Down</span>
+            <div class="inline-controls">
+              <label>
+                Interval
+                <select id="monitorInterval">
+                  <option value="30000">30 seconds</option>
+                  <option value="60000" selected>1 minute</option>
+                  <option value="300000">5 minutes</option>
+                </select>
+              </label>
+              <button class="primary" id="monitorToggle" type="button">
+                Start
+              </button>
             </div>
           </div>
-          <div class="endpoint-grid" id="endpointGrid"></div>
+          <div class="filter-card">
+            <label>
+              Search
+              <input
+                id="searchInput"
+                type="search"
+                placeholder="Search name or URL"
+                autocomplete="off"
+              />
+            </label>
+            <label>
+              Status
+              <select id="statusFilter">
+                <option value="all">All statuses</option>
+                <option value="healthy">Healthy</option>
+                <option value="slow">Slow</option>
+                <option value="down">Down</option>
+                <option value="unknown">Unknown</option>
+              </select>
+            </label>
+            <label>
+              Group
+              <select id="groupFilter">
+                <option value="all">All groups</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <section class="workspace">
+          <aside class="panel">
+            <h2 id="formTitle">Add endpoint</h2>
+            <form id="endpointForm">
+              <input id="editingId" type="hidden" />
+              <label>
+                API name
+                <input
+                  id="endpointName"
+                  type="text"
+                  placeholder="GitHub API"
+                  autocomplete="off"
+                  required
+                />
+              </label>
+              <label>
+                URL
+                <input
+                  id="endpointUrl"
+                  type="url"
+                  placeholder="https://api.github.com"
+                  autocomplete="off"
+                  required
+                />
+              </label>
+              <div class="rule-grid">
+                <label>
+                  Method
+                  <select id="endpointMethod">
+                    <option>GET</option>
+                    <option>POST</option>
+                    <option>PUT</option>
+                    <option>PATCH</option>
+                    <option>DELETE</option>
+                  </select>
+                </label>
+                <label>
+                  Group
+                  <select id="endpointGroup">
+                    <option>Production</option>
+                    <option>Staging</option>
+                    <option>Development</option>
+                  </select>
+                </label>
+              </div>
+              <label>
+                Timeout
+                <select id="endpointTimeout">
+                  <option value="3000">3 seconds</option>
+                  <option value="5000" selected>5 seconds</option>
+                  <option value="8000">8 seconds</option>
+                </select>
+              </label>
+              <div class="rule-grid">
+                <label>
+                  Expected code
+                  <input
+                    id="expectedStatus"
+                    type="number"
+                    min="100"
+                    max="599"
+                    value="200"
+                    required
+                  />
+                </label>
+                <label>
+                  Slow after
+                  <input
+                    id="slowThreshold"
+                    type="number"
+                    min="100"
+                    max="30000"
+                    step="100"
+                    value="900"
+                    required
+                  />
+                </label>
+              </div>
+              <label>
+                Headers
+                <textarea
+                  id="endpointHeaders"
+                  rows="3"
+                  placeholder="Authorization: Bearer token&#10;Accept: application/json"
+                ></textarea>
+              </label>
+              <label>
+                JSON body
+                <textarea
+                  id="endpointBody"
+                  rows="4"
+                  placeholder='{"status":"ok"}'
+                ></textarea>
+              </label>
+              <label>
+                Response must contain
+                <input
+                  id="validationText"
+                  type="text"
+                  placeholder="optional text or JSON fragment"
+                  autocomplete="off"
+                />
+              </label>
+              <p class="form-error" id="formError"></p>
+              <div class="form-actions">
+                <button class="primary wide" id="saveEndpointButton" type="submit">
+                  Add endpoint
+                </button>
+                <button class="ghost wide" id="cancelEditButton" type="button">
+                  Cancel edit
+                </button>
+              </div>
+            </form>
+          </aside>
+
+          <section class="monitor">
+            <div class="section-heading">
+              <div>
+                <h2>Live endpoints</h2>
+                <p id="lastUpdated">No checks yet</p>
+              </div>
+              <div class="legend" aria-label="Status legend">
+                <span><i class="dot healthy"></i>Healthy</span>
+                <span><i class="dot slow"></i>Slow</span>
+                <span><i class="dot down"></i>Down</span>
+              </div>
+            </div>
+            <div class="group-grid" id="groupGrid"></div>
+            <div class="endpoint-grid" id="endpointGrid"></div>
+          </section>
         </section>
       </section>
+
+      <section class="tab-panel" id="endpointsPanel">
+        <div class="section-heading">
+          <div>
+            <h2>Endpoint workspace</h2>
+            <p>Inspect configuration, validation rules, and recent checks.</p>
+          </div>
+        </div>
+        <div class="endpoint-table" id="endpointTable"></div>
+      </section>
+
+      <section class="tab-panel" id="incidentsPanel">
+        <div class="section-heading">
+          <div>
+            <h2>Incident timeline</h2>
+            <p>Failures open incidents automatically and resolve on recovery.</p>
+          </div>
+        </div>
+        <div class="incident-list" id="incidentList"></div>
+      </section>
+
+      <section class="tab-panel" id="reportsPanel">
+        <div class="section-heading">
+          <div>
+            <h2>Reports</h2>
+            <p>Export monitoring snapshots or review high-level API health.</p>
+          </div>
+        </div>
+        <div class="report-grid" id="reportGrid"></div>
+      </section>
+
+      <section class="tab-panel" id="settingsPanel">
+        <div class="settings-grid">
+          <article class="settings-card">
+            <h2>Backup and restore</h2>
+            <p>
+              Save every endpoint, check result, and incident as JSON. Importing
+              replaces the current browser data.
+            </p>
+            <label class="file-label">
+              Import JSON
+              <input id="importJsonInput" type="file" accept="application/json" />
+            </label>
+          </article>
+          <article class="settings-card">
+            <h2>Local storage</h2>
+            <p>
+              PingVista runs fully in your browser. Data stays on this device
+              until you reset, import, or clear browser storage.
+            </p>
+            <strong id="storageSummary">--</strong>
+          </article>
+        </div>
+      </section>
     </main>
+
+    <dialog class="detail-modal" id="detailModal">
+      <div class="modal-top">
+        <div>
+          <p class="eyebrow">Endpoint detail</p>
+          <h2 id="detailTitle">Endpoint</h2>
+        </div>
+        <button class="ghost" id="closeDetailButton" type="button">Close</button>
+      </div>
+      <div class="detail-grid" id="detailContent"></div>
+    </dialog>
 
     <template id="endpointTemplate">
       <article class="endpoint-card">
         <div class="card-top">
           <div>
+            <div class="badge-row">
+              <span class="method-badge"></span>
+              <span class="group-badge"></span>
+            </div>
             <h3 class="endpoint-title"></h3>
             <a class="endpoint-url" target="_blank" rel="noreferrer"></a>
           </div>
@@ -122,10 +336,17 @@
             <strong class="code-value">--</strong>
           </div>
         </div>
+        <div class="rules-row">
+          <span class="rule-badge expected-code"></span>
+          <span class="rule-badge slow-rule"></span>
+          <span class="rule-badge validation-rule"></span>
+        </div>
         <div class="chart" aria-label="Recent latency chart"></div>
         <p class="message"></p>
         <div class="card-actions">
           <button class="secondary check-one" type="button">Check</button>
+          <button class="secondary detail-one" type="button">Details</button>
+          <button class="secondary edit-one" type="button">Edit</button>
           <button class="ghost remove-one" type="button">Remove</button>
         </div>
       </article>

@@ -276,6 +276,57 @@
       <section class="tab-panel" id="settingsPanel">
         <div class="settings-grid">
           <article class="settings-card">
+            <h2>Runtime mode</h2>
+            <p>
+              Browser mode keeps everything in localStorage. Backend mode uses
+              the Node server for checks, persistence, and webhook alerts.
+            </p>
+            <label>
+              Check mode
+              <select id="checkMode">
+                <option value="browser">Browser only</option>
+                <option value="backend">Backend worker</option>
+              </select>
+            </label>
+            <button class="secondary" id="syncBackendButton" type="button">
+              Sync backend
+            </button>
+            <strong id="backendStatus">Backend not checked</strong>
+          </article>
+          <article class="settings-card">
+            <h2>Theme</h2>
+            <p>
+              Switch between light and dark themes. The setting is saved with
+              the rest of the workspace data.
+            </p>
+            <label>
+              Appearance
+              <select id="themeSelect">
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </label>
+          </article>
+          <article class="settings-card">
+            <h2>Webhook alerts</h2>
+            <p>
+              Backend mode can send JSON webhook events when incidents open or
+              recover.
+            </p>
+            <label>
+              Webhook URL
+              <input
+                id="alertWebhookUrl"
+                type="url"
+                placeholder="https://discord.com/api/webhooks/..."
+              />
+            </label>
+            <label class="inline-check">
+              <input id="alertOnRecovery" type="checkbox" checked />
+              Send recovery alerts
+            </label>
+          </article>
+          <article class="settings-card">
             <h2>Backup and restore</h2>
             <p>
               Save every endpoint, check result, and incident as JSON. Importing
@@ -289,8 +340,9 @@
           <article class="settings-card">
             <h2>Local storage</h2>
             <p>
-              PingVista runs fully in your browser. Data stays on this device
-              until you reset, import, or clear browser storage.
+              Browser data stays on this device until you reset, import, or
+              clear browser storage. Backend mode also writes to
+              <code>data/pingvista-db.json</code>.
             </p>
             <strong id="storageSummary">--</strong>
           </article>

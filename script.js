@@ -1,5 +1,5 @@
-const STORAGE_KEY = "api-pulse-monitor-v3";
-const LEGACY_KEYS = ["api-pulse-monitor-v2", "api-pulse-monitor-v1"];
+const STORAGE_KEY = "api-pulse-monitor-v4";
+const LEGACY_KEYS = ["api-pulse-monitor-v3", "api-pulse-monitor-v2", "api-pulse-monitor-v1"];
 const HISTORY_LIMIT = 30;
 const DEFAULT_SLOW_THRESHOLD_MS = 900;
 const DEFAULT_EXPECTED_STATUS = 200;
@@ -69,6 +69,12 @@ const elements = {
   exportCsv: document.querySelector("#exportCsvButton"),
   exportJson: document.querySelector("#exportJsonButton"),
   importJson: document.querySelector("#importJsonInput"),
+  checkMode: document.querySelector("#checkMode"),
+  syncBackend: document.querySelector("#syncBackendButton"),
+  backendStatus: document.querySelector("#backendStatus"),
+  theme: document.querySelector("#themeSelect"),
+  alertWebhookUrl: document.querySelector("#alertWebhookUrl"),
+  alertOnRecovery: document.querySelector("#alertOnRecovery"),
   reset: document.querySelector("#resetButton"),
   monitorToggle: document.querySelector("#monitorToggle"),
   monitorInterval: document.querySelector("#monitorInterval"),
@@ -100,7 +106,13 @@ function syncStateRefs() {
 function createSeedState() {
   return {
     endpoints: seedEndpoints.map(normalizeEndpoint),
-    incidents: []
+    incidents: [],
+    settings: {
+      checkMode: "browser",
+      theme: "light",
+      alertWebhookUrl: "",
+      alertOnRecovery: true
+    }
   };
 }
 
@@ -128,7 +140,8 @@ function loadState() {
         : createSeedState().endpoints,
       incidents: Array.isArray(parsed.incidents)
         ? parsed.incidents.map(normalizeIncident)
-        : []
+        : [],
+      settings: normalizeSettings(parsed.settings)
     };
   } catch {
     return createSeedState();
@@ -137,6 +150,91 @@ function loadState() {
 
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  applyTheme();
+  syncSettingsControls();
+
+  if (state.settings.checkMode === "backend") {
+    syncStateToBackend();
+  }
+}
+
+function normalizeSettings(settings = {}) {
+  return {
+    checkMode: settings.checkMode === "backend" || settings.mode === "backend" ? "backend" : "browser",
+    theme: settings.theme === "dark" ? "dark" : "light",
+    alertWebhookUrl: settings.alertWebhookUrl || "",
+    alertOnRecovery: settings.alertOnRecovery !== false
+  };
+}
+
+function applyTheme() {
+  document.documentElement.dataset.theme = state.settings.theme;
+}
+
+function syncSettingsControls() {
+  elements.checkMode.value = state.settings.checkMode;
+  elements.theme.value = state.settings.theme;
+  elements.alertWebhookUrl.value = state.settings.alertWebhookUrl;
+  elements.alertOnRecovery.checked = state.settings.alertOnRecovery;
+}
+
+async function syncStateToBackend() {
+  try {
+    const response = await fetch("/api/state", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...state,
+        settings: {
+          mode: state.settings.checkMode,
+          theme: state.settings.theme,
+          alertWebhookUrl: state.settings.alertWebhookUrl,
+          alertOnRecovery: state.settings.alertOnRecovery
+        }
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error("Backend sync failed.");
+    }
+
+    elements.backendStatus.textContent = "Backend synced";
+  } catch {
+    elements.backendStatus.textContent = "Backend unavailable";
+  }
+}
+
+async function loadStateFromBackend() {
+  try {
+    const response = await fetch("/api/state", { cache: "no-store" });
+
+    if (!response.ok) {
+      throw new Error("Backend unavailable.");
+    }
+
+    const backendState = await response.json();
+    state = {
+      endpoints: Array.isArray(backendState.endpoints)
+        ? backendState.endpoints.map(normalizeEndpoint)
+        : endpoints,
+      incidents: Array.isArray(backendState.incidents)
+        ? backendState.incidents.map(normalizeIncident)
+        : incidents,
+      settings: normalizeSettings({
+        checkMode: backendState.settings?.mode || state.settings.checkMode,
+        theme: backendState.settings?.theme || state.settings.theme,
+        alertWebhookUrl: backendState.settings?.alertWebhookUrl || "",
+        alertOnRecovery: backendState.settings?.alertOnRecovery
+      })
+    };
+    syncStateRefs();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    elements.backendStatus.textContent = "Backend connected";
+    return true;
+  } catch {
+    elements.backendStatus.textContent = "Backend unavailable";
+    return false;
+  }
 }
 
 function normalizeEndpoint(endpoint) {
@@ -563,9 +661,18 @@ function renderIncidents() {
 
 function renderReports() {
   const checks = endpoints.flatMap((endpoint) => endpoint.history);
+  const successfulChecks = checks.filter((check) => check.ok);
+  const average = averageLatency(checks);
+  const uptime = checks.length
+    ? Math.round((successfulChecks.length / checks.length) * 100)
+    : 0;
+  const backendChecks = checks.filter((check) => check.checkedBy === "backend").length;
   const reportItems = [
     ["Total checks", checks.length],
     ["Failed checks", checks.filter((check) => !check.ok).length],
+    ["Overall uptime", `${uptime}%`],
+    ["Avg latency", average ? `${average} ms` : "--"],
+    ["Backend checks", backendChecks],
     ["Validated endpoints", endpoints.filter((endpoint) => endpoint.validationText).length],
     ["Open incidents", incidents.filter((incident) => incident.status === "open").length],
     ["Resolved incidents", incidents.filter((incident) => incident.status === "resolved").length],
@@ -583,7 +690,7 @@ function renderReports() {
 
 function renderStorageSummary() {
   const bytes = new Blob([JSON.stringify(state)]).size;
-  elements.storageSummary.textContent = `${endpoints.length} endpoints, ${incidents.length} incidents, ${bytes} bytes saved`;
+  elements.storageSummary.textContent = `${endpoints.length} endpoints, ${incidents.length} incidents, ${bytes} bytes saved, ${state.settings.checkMode} mode`;
 }
 
 function validateResponseBody(endpoint, bodyText) {
@@ -697,18 +804,73 @@ async function checkEndpoint(id) {
   const card = document.querySelector(`[data-id="${id}"]`);
   card?.classList.add("is-checking");
 
-  const result = await pingEndpoint(endpoint);
-  endpoint.history = endpoint.history.concat(result).slice(-HISTORY_LIMIT);
-  updateIncident(endpoint, result);
+  if (state.settings.checkMode === "backend") {
+    try {
+      const response = await fetch(`/api/check/${encodeURIComponent(id)}`, {
+        method: "POST"
+      });
+
+      if (!response.ok) {
+        throw new Error("Backend check failed.");
+      }
+
+      const payload = await response.json();
+      state = {
+        endpoints: payload.state.endpoints.map(normalizeEndpoint),
+        incidents: payload.state.incidents.map(normalizeIncident),
+        settings: state.settings
+      };
+      syncStateRefs();
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      elements.backendStatus.textContent = "Backend check completed";
+    } catch {
+      elements.backendStatus.textContent = "Backend unavailable, used browser check";
+      const result = await pingEndpoint(endpoint);
+      endpoint.history = endpoint.history.concat({ ...result, checkedBy: "browser" }).slice(HISTORY_LIMIT * -1);
+      updateIncident(endpoint, result);
+    }
+  } else {
+    const result = await pingEndpoint(endpoint);
+    endpoint.history = endpoint.history.concat({ ...result, checkedBy: "browser" }).slice(HISTORY_LIMIT * -1);
+    updateIncident(endpoint, result);
+  }
+
   elements.lastUpdated.textContent = `Last checked ${new Date().toLocaleTimeString()}`;
 
-  saveState();
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   renderAll();
 }
 
 async function checkAllEndpoints() {
   elements.checkAll.classList.add("is-checking");
-  await Promise.all(endpoints.map((endpoint) => checkEndpoint(endpoint.id)));
+
+  if (state.settings.checkMode === "backend") {
+    try {
+      const response = await fetch("/api/check-all", { method: "POST" });
+
+      if (!response.ok) {
+        throw new Error("Backend check failed.");
+      }
+
+      const backendState = await response.json();
+      state = {
+        endpoints: backendState.endpoints.map(normalizeEndpoint),
+        incidents: backendState.incidents.map(normalizeIncident),
+        settings: state.settings
+      };
+      syncStateRefs();
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      elements.backendStatus.textContent = "Backend check completed";
+      elements.lastUpdated.textContent = `Last checked ${new Date().toLocaleTimeString()}`;
+      renderAll();
+    } catch {
+      elements.backendStatus.textContent = "Backend unavailable, used browser checks";
+      await Promise.all(endpoints.map((endpoint) => checkEndpoint(endpoint.id)));
+    }
+  } else {
+    await Promise.all(endpoints.map((endpoint) => checkEndpoint(endpoint.id)));
+  }
+
   elements.checkAll.classList.remove("is-checking");
 }
 
@@ -929,7 +1091,8 @@ function importJson(file) {
           : [],
         incidents: Array.isArray(parsed.incidents)
           ? parsed.incidents.map(normalizeIncident)
-          : []
+          : [],
+        settings: normalizeSettings(parsed.settings || state.settings)
       };
       syncStateRefs();
       stopMonitoring();
@@ -974,6 +1137,37 @@ elements.checkAll.addEventListener("click", checkAllEndpoints);
 elements.exportCsv.addEventListener("click", exportCsv);
 elements.exportJson.addEventListener("click", exportJson);
 elements.importJson.addEventListener("change", (event) => importJson(event.target.files[0]));
+elements.checkMode.addEventListener("change", async () => {
+  state.settings.checkMode = elements.checkMode.value;
+  saveState();
+
+  if (state.settings.checkMode === "backend") {
+    await syncStateToBackend();
+  }
+
+  renderAll();
+});
+elements.theme.addEventListener("change", () => {
+  state.settings.theme = elements.theme.value;
+  saveState();
+});
+elements.alertWebhookUrl.addEventListener("change", () => {
+  state.settings.alertWebhookUrl = elements.alertWebhookUrl.value.trim();
+  saveState();
+});
+elements.alertOnRecovery.addEventListener("change", () => {
+  state.settings.alertOnRecovery = elements.alertOnRecovery.checked;
+  saveState();
+});
+elements.syncBackend.addEventListener("click", async () => {
+  if (state.settings.checkMode === "backend") {
+    await loadStateFromBackend();
+  } else {
+    await syncStateToBackend();
+  }
+
+  renderAll();
+});
 elements.monitorInterval.addEventListener("change", () => {
   if (monitorTimer) scheduleNextCheck();
 });
@@ -1014,5 +1208,14 @@ elements.reset.addEventListener("click", () => {
 elements.closeDetail.addEventListener("click", () => elements.detailModal.close());
 
 resetForm();
-renderAll();
-updateMonitoringStatus();
+applyTheme();
+syncSettingsControls();
+loadStateFromBackend().then((connected) => {
+  if (!connected && state.settings.checkMode === "backend") {
+    state.settings.checkMode = "browser";
+    saveState();
+  }
+
+  renderAll();
+  updateMonitoringStatus();
+});

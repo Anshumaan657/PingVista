@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "check": "node --check server.js && node --check script.js",
-    "test:security": "node tests/security-validation.test.js"
+    "test:security": "node tests/security-validation.test.js && node tests/rate-limit.test.js"
   },
   "keywords": [
     "api-monitoring",

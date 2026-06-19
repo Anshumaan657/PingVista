@@ -13,6 +13,15 @@ const MAX_SLOW_THRESHOLD_MS = 60_000;
 const MAX_HEADER_TEXT_LENGTH = 8_000;
 const MAX_BODY_TEXT_LENGTH = 100_000;
 const MAX_VALIDATION_TEXT_LENGTH = 2_000;
+const MAX_ENDPOINTS = 50;
+const STATE_BODY_LIMIT_BYTES = 500_000;
+const DEFAULT_BODY_LIMIT_BYTES = 50_000;
+const rateLimitBuckets = new Map();
+const RATE_LIMITS = {
+  read: { limit: 120, windowMs: 60_000 },
+  write: { limit: 20, windowMs: 60_000 },
+  check: { limit: 30, windowMs: 60_000 }
+};
 const PUBLIC_FILES = new Map([
   ["/", "index.html"],
   ["/index.html", "index.html"],
@@ -96,15 +105,61 @@ function sendJson(response, statusCode, payload) {
   response.end(JSON.stringify(payload));
 }
 
-function collectBody(request) {
+function rateLimitError(message = "Too many requests. Try again soon.") {
+  const error = new Error(message);
+  error.statusCode = 429;
+  error.code = "RATE_LIMITED";
+  return error;
+}
+
+function bodyTooLargeError(limitBytes) {
+  const error = new Error(`Request body must be ${limitBytes} bytes or less.`);
+  error.statusCode = 413;
+  error.code = "BODY_TOO_LARGE";
+  return error;
+}
+
+function getClientKey(request) {
+  const forwarded = request.headers["x-forwarded-for"];
+  const ip = Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(",")[0];
+  return (ip || request.socket.remoteAddress || "unknown").trim();
+}
+
+function enforceRateLimit(request, bucketName) {
+  const config = RATE_LIMITS[bucketName];
+
+  if (!config) {
+    return;
+  }
+
+  const key = `${bucketName}:${getClientKey(request)}`;
+  const now = Date.now();
+  const bucket = rateLimitBuckets.get(key);
+
+  if (!bucket || now > bucket.resetAt) {
+    rateLimitBuckets.set(key, {
+      count: 1,
+      resetAt: now + config.windowMs
+    });
+    return;
+  }
+
+  bucket.count += 1;
+
+  if (bucket.count > config.limit) {
+    throw rateLimitError();
+  }
+}
+
+function collectBody(request, limitBytes = DEFAULT_BODY_LIMIT_BYTES) {
   return new Promise((resolve, reject) => {
     let body = "";
 
     request.on("data", (chunk) => {
       body += chunk;
 
-      if (body.length > 1_000_000) {
-        reject(new Error("Request body is too large."));
+      if (Buffer.byteLength(body, "utf8") > limitBytes) {
+        reject(bodyTooLargeError(limitBytes));
         request.destroy();
       }
     });
@@ -302,6 +357,10 @@ function validateSettings(settings = {}) {
 }
 
 function validateState(state = {}) {
+  if (Array.isArray(state.endpoints) && state.endpoints.length > MAX_ENDPOINTS) {
+    throw validationError(`Workspace can contain at most ${MAX_ENDPOINTS} endpoints.`);
+  }
+
   return {
     endpoints: Array.isArray(state.endpoints)
       ? state.endpoints.map(validateEndpoint)
@@ -467,12 +526,14 @@ async function checkAndPersist(endpointId) {
 
 async function handleApi(request, response, url) {
   if (url.pathname === "/api/state" && request.method === "GET") {
+    enforceRateLimit(request, "read");
     sendJson(response, 200, readState());
     return;
   }
 
   if (url.pathname === "/api/state" && request.method === "PUT") {
-    const body = await collectBody(request);
+    enforceRateLimit(request, "write");
+    const body = await collectBody(request, STATE_BODY_LIMIT_BYTES);
     const nextState = JSON.parse(body || "{}");
     writeState({
       ...DEFAULT_STATE,
@@ -487,6 +548,7 @@ async function handleApi(request, response, url) {
   }
 
   if (url.pathname === "/api/check-all" && request.method === "POST") {
+    enforceRateLimit(request, "check");
     const state = readState();
 
     for (const endpoint of state.endpoints) {
@@ -504,6 +566,7 @@ async function handleApi(request, response, url) {
   const checkMatch = url.pathname.match(/^\/api\/check\/([^/]+)$/);
 
   if (checkMatch && request.method === "POST") {
+    enforceRateLimit(request, "check");
     const { statusCode, payload } = await checkAndPersist(decodeURIComponent(checkMatch[1]));
     sendJson(response, statusCode, payload);
     return;

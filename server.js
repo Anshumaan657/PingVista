@@ -6,6 +6,13 @@ const { performance } = require("node:perf_hooks");
 const PORT = Number(process.env.PORT) || 4175;
 const DATA_DIR = path.join(__dirname, "data");
 const DB_PATH = path.join(DATA_DIR, "pingvista-db.json");
+const ALLOWED_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE"]);
+const BODY_METHODS = new Set(["POST", "PUT", "PATCH"]);
+const MAX_TIMEOUT_MS = 30_000;
+const MAX_SLOW_THRESHOLD_MS = 60_000;
+const MAX_HEADER_TEXT_LENGTH = 8_000;
+const MAX_BODY_TEXT_LENGTH = 100_000;
+const MAX_VALIDATION_TEXT_LENGTH = 2_000;
 const PUBLIC_FILES = new Map([
   ["/", "index.html"],
   ["/index.html", "index.html"],
@@ -78,7 +85,7 @@ function readState() {
 
 function writeState(state) {
   ensureDataFile();
-  fs.writeFileSync(DB_PATH, JSON.stringify(state, null, 2));
+  fs.writeFileSync(DB_PATH, JSON.stringify(validateState(state), null, 2));
 }
 
 function sendJson(response, statusCode, payload) {
@@ -107,7 +114,104 @@ function collectBody(request) {
   });
 }
 
+function validationError(message, code = "VALIDATION_ERROR") {
+  const error = new Error(message);
+  error.statusCode = 400;
+  error.code = code;
+  return error;
+}
+
+function isPrivateIPv4(hostname) {
+  const parts = hostname.split(".").map((part) => Number(part));
+
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return false;
+  }
+
+  const [a, b] = parts;
+
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    a >= 224
+  );
+}
+
+function isUnsafeHostname(hostname) {
+  const normalized = hostname.toLowerCase().replace(/\.$/, "");
+
+  if (
+    normalized === "localhost" ||
+    normalized === "0.0.0.0" ||
+    normalized === "127.0.0.1" ||
+    normalized === "::1" ||
+    normalized === "[::1]" ||
+    normalized.endsWith(".localhost") ||
+    normalized === "metadata.google.internal"
+  ) {
+    return true;
+  }
+
+  if (isPrivateIPv4(normalized)) {
+    return true;
+  }
+
+  if (
+    normalized.startsWith("fc") ||
+    normalized.startsWith("fd") ||
+    normalized.startsWith("fe80:") ||
+    normalized === "100.100.100.200" ||
+    normalized === "169.254.169.254"
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function validatePublicUrl(value, fieldName) {
+  let parsed;
+
+  try {
+    parsed = new URL(String(value || "").trim());
+  } catch {
+    throw validationError(`${fieldName} must be a valid URL.`);
+  }
+
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw validationError(`${fieldName} must use HTTP or HTTPS.`);
+  }
+
+  if (parsed.username || parsed.password) {
+    throw validationError(`${fieldName} must not include credentials.`);
+  }
+
+  if (isUnsafeHostname(parsed.hostname)) {
+    throw validationError(`${fieldName} points to a blocked private or metadata host.`);
+  }
+
+  return parsed.toString();
+}
+
+function validateNumber(value, fieldName, min, max) {
+  const number = Number(value);
+
+  if (!Number.isInteger(number) || number < min || number > max) {
+    throw validationError(`${fieldName} must be an integer between ${min} and ${max}.`);
+  }
+
+  return number;
+}
+
 function parseHeaders(headersText = "") {
+  if (headersText.length > MAX_HEADER_TEXT_LENGTH) {
+    throw validationError("Headers are too large.");
+  }
+
   const headers = {};
   const lines = headersText.split("\n").map((line) => line.trim()).filter(Boolean);
 
@@ -125,10 +229,86 @@ function parseHeaders(headersText = "") {
       throw new Error(`Header "${line}" must include both key and value.`);
     }
 
+    if (/[\r\n]/.test(key) || /[\r\n]/.test(value)) {
+      throw validationError("Headers must not contain newline injection.");
+    }
+
     headers[key] = value;
   }
 
   return headers;
+}
+
+function validateEndpoint(endpoint) {
+  const method = String(endpoint.method || "GET").toUpperCase();
+
+  if (!ALLOWED_METHODS.has(method)) {
+    throw validationError("HTTP method is not supported.");
+  }
+
+  const bodyText = String(endpoint.bodyText || "").trim();
+
+  if (bodyText.length > MAX_BODY_TEXT_LENGTH) {
+    throw validationError("JSON body is too large.");
+  }
+
+  if (bodyText && !BODY_METHODS.has(method)) {
+    throw validationError("JSON body is only allowed for POST, PUT, and PATCH.");
+  }
+
+  if (bodyText) {
+    try {
+      JSON.parse(bodyText);
+    } catch {
+      throw validationError("JSON body must be valid JSON.");
+    }
+  }
+
+  parseHeaders(String(endpoint.headersText || ""));
+
+  const validationText = String(endpoint.validationText || "").trim();
+
+  if (validationText.length > MAX_VALIDATION_TEXT_LENGTH) {
+    throw validationError("Response validation text is too large.");
+  }
+
+  return {
+    id: endpoint.id || crypto.randomUUID(),
+    name: String(endpoint.name || "Untitled API").trim().slice(0, 120),
+    url: validatePublicUrl(endpoint.url, "Endpoint URL"),
+    method,
+    group: String(endpoint.group || "Production").trim().slice(0, 80),
+    timeout: validateNumber(endpoint.timeout || 5000, "Timeout", 500, MAX_TIMEOUT_MS),
+    expectedStatus: validateNumber(endpoint.expectedStatus || 200, "Expected status", 100, 599),
+    slowThreshold: validateNumber(endpoint.slowThreshold || 900, "Slow threshold", 100, MAX_SLOW_THRESHOLD_MS),
+    headersText: String(endpoint.headersText || "").trim(),
+    bodyText,
+    validationText,
+    history: Array.isArray(endpoint.history) ? endpoint.history.slice(-100) : []
+  };
+}
+
+function validateSettings(settings = {}) {
+  const alertWebhookUrl = String(settings.alertWebhookUrl || "").trim();
+
+  return {
+    mode: settings.mode === "backend" ? "backend" : "browser",
+    theme: settings.theme === "dark" ? "dark" : "light",
+    alertWebhookUrl: alertWebhookUrl
+      ? validatePublicUrl(alertWebhookUrl, "Webhook URL")
+      : "",
+    alertOnRecovery: settings.alertOnRecovery !== false
+  };
+}
+
+function validateState(state = {}) {
+  return {
+    endpoints: Array.isArray(state.endpoints)
+      ? state.endpoints.map(validateEndpoint)
+      : [],
+    incidents: Array.isArray(state.incidents) ? state.incidents : [],
+    settings: validateSettings(state.settings || {})
+  };
 }
 
 function validateResponseBody(endpoint, bodyText) {
@@ -142,6 +322,7 @@ function validateResponseBody(endpoint, bodyText) {
 }
 
 async function runEndpointCheck(endpoint) {
+  endpoint = validateEndpoint(endpoint);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Number(endpoint.timeout) || 5000);
   const startedAt = performance.now();
@@ -203,7 +384,7 @@ async function runEndpointCheck(endpoint) {
 }
 
 async function maybeSendAlert(state, incident, eventType) {
-  const webhookUrl = state.settings?.alertWebhookUrl;
+  const webhookUrl = validateSettings(state.settings || {}).alertWebhookUrl;
 
   if (!webhookUrl) {
     return;
@@ -362,7 +543,10 @@ const server = http.createServer(async (request, response) => {
 
     serveStatic(response, url.pathname);
   } catch (error) {
-    sendJson(response, 500, { error: error.message || "Server error." });
+    sendJson(response, error.statusCode || 500, {
+      error: error.message || "Server error.",
+      code: error.code || "SERVER_ERROR"
+    });
   }
 });
 

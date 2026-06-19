@@ -8,6 +8,9 @@ Version 4 adds a backend mode while keeping the original frontend-only workflow 
 
 - Optional Node.js backend worker for server-side API checks
 - File-based JSON persistence in `data/pingvista-db.json`
+- Optional Supabase Auth and PostgreSQL persistence
+- Per-user endpoints, checks, incidents, and settings in Supabase mode
+- Backend scheduler for periodic saved endpoint checks
 - Backend check endpoints for single and bulk monitoring
 - Webhook alert support for down and recovery events
 - Dark mode
@@ -61,6 +64,24 @@ Backend mode stores data in:
 ```text
 data/pingvista-db.json
 ```
+
+### Supabase mode
+
+Create a Supabase project, run `supabase/schema.sql` in the SQL editor, then copy `.env.example` to `.env` and set:
+
+```env
+SUPABASE_URL=
+SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+SCHEDULER_INTERVAL_MS=300000
+```
+
+When Supabase variables are present:
+
+- Users can sign up and sign in from the Settings tab.
+- Backend API routes require a valid Supabase session.
+- Endpoints, checks, incidents, and settings are stored per user.
+- Scheduled checks run from the backend while the Node server is running.
 
 ## Demo Endpoints
 
@@ -123,6 +144,12 @@ The backend sends payloads shaped like:
 PingVista/
 ├── data/
 │   └── .gitkeep
+├── supabase/
+│   └── schema.sql
+├── tests/
+│   ├── rate-limit.test.js
+│   └── security-validation.test.js
+├── .env.example
 ├── index.html
 ├── package.json
 ├── script.js
@@ -141,6 +168,7 @@ PingVista/
 - `AbortController` for request timeouts
 - `localStorage` for browser mode
 - JSON file persistence for backend mode
+- Supabase Auth and PostgreSQL for deployment-ready mode
 - SVG for latency charts
 
 ## Useful Commands

@@ -276,6 +276,27 @@
       <section class="tab-panel" id="settingsPanel">
         <div class="settings-grid">
           <article class="settings-card">
+            <h2>Account</h2>
+            <p>
+              Supabase mode uses your account to keep endpoints, checks,
+              incidents, and settings separate from other users.
+            </p>
+            <label>
+              Email
+              <input id="authEmail" type="email" placeholder="you@example.com" />
+            </label>
+            <label>
+              Password
+              <input id="authPassword" type="password" placeholder="Password" />
+            </label>
+            <div class="form-actions">
+              <button class="secondary" id="signInButton" type="button">Sign in</button>
+              <button class="secondary" id="signUpButton" type="button">Sign up</button>
+              <button class="ghost" id="signOutButton" type="button">Sign out</button>
+            </div>
+            <strong id="authStatus">Auth not checked</strong>
+          </article>
+          <article class="settings-card">
             <h2>Runtime mode</h2>
             <p>
               Browser mode keeps everything in localStorage. Backend mode uses

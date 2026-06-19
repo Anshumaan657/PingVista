@@ -1,4 +1,6 @@
 const STORAGE_KEY = "api-pulse-monitor-v4";
+const AUTH_TOKEN_KEY = "pingvista-auth-token-v1";
+const AUTH_EMAIL_KEY = "pingvista-auth-email-v1";
 const LEGACY_KEYS = ["api-pulse-monitor-v3", "api-pulse-monitor-v2", "api-pulse-monitor-v1"];
 const HISTORY_LIMIT = 30;
 const DEFAULT_SLOW_THRESHOLD_MS = 900;
@@ -69,6 +71,12 @@ const elements = {
   exportCsv: document.querySelector("#exportCsvButton"),
   exportJson: document.querySelector("#exportJsonButton"),
   importJson: document.querySelector("#importJsonInput"),
+  authEmail: document.querySelector("#authEmail"),
+  authPassword: document.querySelector("#authPassword"),
+  signIn: document.querySelector("#signInButton"),
+  signUp: document.querySelector("#signUpButton"),
+  signOut: document.querySelector("#signOutButton"),
+  authStatus: document.querySelector("#authStatus"),
   checkMode: document.querySelector("#checkMode"),
   syncBackend: document.querySelector("#syncBackendButton"),
   backendStatus: document.querySelector("#backendStatus"),
@@ -94,6 +102,9 @@ const elements = {
 let state = loadState();
 let endpoints = state.endpoints;
 let incidents = state.incidents;
+let authToken = localStorage.getItem(AUTH_TOKEN_KEY) || "";
+let authEmail = localStorage.getItem(AUTH_EMAIL_KEY) || "";
+let supabaseAuthEnabled = false;
 let monitorTimer = null;
 let countdownTimer = null;
 let nextCheckAt = null;
@@ -172,15 +183,102 @@ function applyTheme() {
 }
 
 function syncSettingsControls() {
+  elements.authEmail.value = authEmail;
+  elements.authStatus.textContent = authToken
+    ? `Signed in as ${authEmail || "Supabase user"}`
+    : supabaseAuthEnabled
+      ? "Sign in to use Supabase storage"
+      : "Supabase auth not configured";
   elements.checkMode.value = state.settings.checkMode;
   elements.theme.value = state.settings.theme;
   elements.alertWebhookUrl.value = state.settings.alertWebhookUrl;
   elements.alertOnRecovery.checked = state.settings.alertOnRecovery;
 }
 
+async function apiFetch(path, options = {}) {
+  const headers = {
+    ...(options.headers || {})
+  };
+
+  if (authToken) {
+    headers.Authorization = `Bearer ${authToken}`;
+  }
+
+  const response = await fetch(path, {
+    ...options,
+    headers
+  });
+
+  if (response.status === 401) {
+    elements.authStatus.textContent = "Sign in required for Supabase mode";
+  }
+
+  return response;
+}
+
+async function checkAuthConfig() {
+  try {
+    const response = await fetch("/api/auth/config", { cache: "no-store" });
+    const config = await response.json();
+    supabaseAuthEnabled = Boolean(config.enabled);
+  } catch {
+    supabaseAuthEnabled = false;
+  }
+
+  syncSettingsControls();
+}
+
+async function authRequest(mode) {
+  const email = elements.authEmail.value.trim();
+  const password = elements.authPassword.value;
+
+  if (!email || !password) {
+    elements.authStatus.textContent = "Enter email and password";
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/auth/${mode}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password })
+    });
+    const payload = await response.json();
+
+    if (!response.ok) {
+      throw new Error(payload.error || "Authentication failed.");
+    }
+
+    authToken = payload.access_token || payload.session?.access_token || "";
+    authEmail = payload.user?.email || email;
+
+    if (!authToken) {
+      elements.authStatus.textContent = "Check your email to confirm signup";
+      return;
+    }
+
+    localStorage.setItem(AUTH_TOKEN_KEY, authToken);
+    localStorage.setItem(AUTH_EMAIL_KEY, authEmail);
+    elements.authPassword.value = "";
+    elements.authStatus.textContent = `Signed in as ${authEmail}`;
+    await loadStateFromBackend();
+    renderAll();
+  } catch (error) {
+    elements.authStatus.textContent = error.message;
+  }
+}
+
+function signOut() {
+  authToken = "";
+  authEmail = "";
+  localStorage.removeItem(AUTH_TOKEN_KEY);
+  localStorage.removeItem(AUTH_EMAIL_KEY);
+  syncSettingsControls();
+}
+
 async function syncStateToBackend() {
   try {
-    const response = await fetch("/api/state", {
+    const response = await apiFetch("/api/state", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -206,7 +304,7 @@ async function syncStateToBackend() {
 
 async function loadStateFromBackend() {
   try {
-    const response = await fetch("/api/state", { cache: "no-store" });
+    const response = await apiFetch("/api/state", { cache: "no-store" });
 
     if (!response.ok) {
       throw new Error("Backend unavailable.");
@@ -806,7 +904,7 @@ async function checkEndpoint(id) {
 
   if (state.settings.checkMode === "backend") {
     try {
-      const response = await fetch(`/api/check/${encodeURIComponent(id)}`, {
+      const response = await apiFetch(`/api/check/${encodeURIComponent(id)}`, {
         method: "POST"
       });
 
@@ -846,7 +944,7 @@ async function checkAllEndpoints() {
 
   if (state.settings.checkMode === "backend") {
     try {
-      const response = await fetch("/api/check-all", { method: "POST" });
+      const response = await apiFetch("/api/check-all", { method: "POST" });
 
       if (!response.ok) {
         throw new Error("Backend check failed.");
@@ -1137,6 +1235,9 @@ elements.checkAll.addEventListener("click", checkAllEndpoints);
 elements.exportCsv.addEventListener("click", exportCsv);
 elements.exportJson.addEventListener("click", exportJson);
 elements.importJson.addEventListener("change", (event) => importJson(event.target.files[0]));
+elements.signIn.addEventListener("click", () => authRequest("signin"));
+elements.signUp.addEventListener("click", () => authRequest("signup"));
+elements.signOut.addEventListener("click", signOut);
 elements.checkMode.addEventListener("change", async () => {
   state.settings.checkMode = elements.checkMode.value;
   saveState();
@@ -1210,6 +1311,7 @@ elements.closeDetail.addEventListener("click", () => elements.detailModal.close(
 resetForm();
 applyTheme();
 syncSettingsControls();
+checkAuthConfig();
 loadStateFromBackend().then((connected) => {
   if (!connected && state.settings.checkMode === "backend") {
     state.settings.checkMode = "browser";

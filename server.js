@@ -4,6 +4,10 @@ const path = require("node:path");
 const { performance } = require("node:perf_hooks");
 
 const PORT = Number(process.env.PORT) || 4175;
+const SUPABASE_URL = process.env.SUPABASE_URL || "";
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "";
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+const SCHEDULER_INTERVAL_MS = Number(process.env.SCHEDULER_INTERVAL_MS || 300_000);
 const DATA_DIR = path.join(__dirname, "data");
 const DB_PATH = path.join(DATA_DIR, "pingvista-db.json");
 const ALLOWED_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE"]);
@@ -29,10 +33,12 @@ const PUBLIC_FILES = new Map([
   ["/script.js", "script.js"]
 ]);
 
+const supabaseEnabled = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY && SUPABASE_SERVICE_ROLE_KEY);
+
 const DEFAULT_STATE = {
   endpoints: [
     {
-      id: "demo-github-api",
+      id: "11111111-1111-4111-8111-111111111111",
       name: "GitHub API",
       url: "https://api.github.com",
       method: "GET",
@@ -46,7 +52,7 @@ const DEFAULT_STATE = {
       history: []
     },
     {
-      id: "demo-jsonplaceholder",
+      id: "22222222-2222-4222-8222-222222222222",
       name: "JSONPlaceholder",
       url: "https://jsonplaceholder.typicode.com/posts",
       method: "GET",
@@ -103,6 +109,111 @@ function sendJson(response, statusCode, payload) {
     "Cache-Control": "no-store"
   });
   response.end(JSON.stringify(payload));
+}
+
+function authError(message = "Authentication required.") {
+  const error = new Error(message);
+  error.statusCode = 401;
+  error.code = "AUTH_REQUIRED";
+  return error;
+}
+
+function supabaseHeaders(useServiceRole = true, token = "") {
+  const apiKey = useServiceRole ? SUPABASE_SERVICE_ROLE_KEY : SUPABASE_ANON_KEY;
+
+  return {
+    apikey: apiKey,
+    Authorization: token ? `Bearer ${token}` : `Bearer ${apiKey}`,
+    "Content-Type": "application/json"
+  };
+}
+
+async function supabaseRequest(pathname, options = {}) {
+  if (!supabaseEnabled) {
+    throw validationError("Supabase is not configured.", "SUPABASE_NOT_CONFIGURED");
+  }
+
+  const response = await fetch(`${SUPABASE_URL}${pathname}`, {
+    ...options,
+    headers: {
+      ...supabaseHeaders(options.useServiceRole !== false, options.token || ""),
+      Prefer: options.prefer || "",
+      ...(options.headers || {})
+    }
+  });
+
+  const text = await response.text();
+  const payload = text ? JSON.parse(text) : null;
+
+  if (!response.ok) {
+    const error = new Error(payload?.msg || payload?.message || payload?.error || "Supabase request failed.");
+    error.statusCode = response.status;
+    error.code = "SUPABASE_ERROR";
+    throw error;
+  }
+
+  return payload;
+}
+
+async function verifyUser(request) {
+  if (!supabaseEnabled) {
+    return null;
+  }
+
+  const authHeader = request.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+
+  if (!token) {
+    throw authError();
+  }
+
+  const user = await supabaseRequest("/auth/v1/user", {
+    method: "GET",
+    useServiceRole: false,
+    token
+  });
+
+  if (!user?.id) {
+    throw authError("Invalid Supabase session.");
+  }
+
+  await supabaseRequest("/rest/v1/users", {
+    method: "POST",
+    prefer: "resolution=merge-duplicates",
+    body: JSON.stringify({
+      id: user.id,
+      email: user.email || ""
+    })
+  });
+
+  return { id: user.id, email: user.email || "", token };
+}
+
+async function proxySupabaseAuth(pathname, body) {
+  if (!supabaseEnabled) {
+    throw validationError("Supabase auth is not configured.", "SUPABASE_NOT_CONFIGURED");
+  }
+
+  const response = await fetch(`${SUPABASE_URL}${pathname}`, {
+    method: "POST",
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(body)
+  });
+
+  const text = await response.text();
+  const payload = text ? JSON.parse(text) : null;
+
+  if (!response.ok) {
+    const error = new Error(payload?.msg || payload?.message || payload?.error || "Authentication failed.");
+    error.statusCode = response.status;
+    error.code = "AUTH_FAILED";
+    throw error;
+  }
+
+  return payload;
 }
 
 function rateLimitError(message = "Too many requests. Try again soon.") {
@@ -370,6 +481,227 @@ function validateState(state = {}) {
   };
 }
 
+function normalizeIncident(incident) {
+  return {
+    id: incident.id || crypto.randomUUID(),
+    endpointId: incident.endpointId,
+    endpointName: incident.endpointName || "Unknown endpoint",
+    group: incident.group || "Production",
+    status: incident.status === "resolved" ? "resolved" : "open",
+    startedAt: incident.startedAt || new Date().toISOString(),
+    resolvedAt: incident.resolvedAt || null,
+    message: incident.message || "Endpoint failed.",
+    checks: Number(incident.checks) || 1
+  };
+}
+
+function dbEndpointToApp(row, checks = []) {
+  return validateEndpoint({
+    id: row.id,
+    name: row.name,
+    url: row.url,
+    method: row.method,
+    group: row.environment_group,
+    timeout: row.timeout,
+    expectedStatus: row.expected_status,
+    slowThreshold: row.slow_threshold,
+    headersText: row.headers_text,
+    bodyText: row.body_text,
+    validationText: row.validation_text,
+    history: checks.map((check) => ({
+      checkedAt: check.checked_at,
+      ok: check.ok,
+      latency: Number(check.latency),
+      status: check.status,
+      validationOk: check.validation_ok,
+      checkedBy: check.checked_by,
+      message: check.message
+    }))
+  });
+}
+
+function appEndpointToDb(endpoint, userId) {
+  const valid = validateEndpoint(endpoint);
+
+  return {
+    id: valid.id,
+    user_id: userId,
+    name: valid.name,
+    url: valid.url,
+    method: valid.method,
+    environment_group: valid.group,
+    timeout: valid.timeout,
+    expected_status: valid.expectedStatus,
+    slow_threshold: valid.slowThreshold,
+    headers_text: valid.headersText,
+    body_text: valid.bodyText,
+    validation_text: valid.validationText,
+    updated_at: new Date().toISOString()
+  };
+}
+
+function dbIncidentToApp(row) {
+  return normalizeIncident({
+    id: row.id,
+    endpointId: row.endpoint_id,
+    endpointName: row.endpoint_name,
+    group: row.environment_group,
+    status: row.status,
+    startedAt: row.started_at,
+    resolvedAt: row.resolved_at,
+    message: row.message,
+    checks: row.checks
+  });
+}
+
+function appIncidentToDb(incident, userId) {
+  const valid = normalizeIncident(incident);
+
+  return {
+    id: valid.id,
+    user_id: userId,
+    endpoint_id: valid.endpointId,
+    endpoint_name: valid.endpointName,
+    environment_group: valid.group,
+    status: valid.status,
+    started_at: valid.startedAt,
+    resolved_at: valid.resolvedAt,
+    message: valid.message,
+    checks: valid.checks
+  };
+}
+
+function dbSettingsToApp(row = {}) {
+  return validateSettings({
+    mode: row.mode || "backend",
+    theme: row.theme || "light",
+    alertWebhookUrl: row.alert_webhook_url || "",
+    alertOnRecovery: row.alert_on_recovery
+  });
+}
+
+function appSettingsToDb(settings, userId) {
+  const valid = validateSettings(settings);
+
+  return {
+    user_id: userId,
+    mode: valid.mode,
+    theme: valid.theme,
+    alert_webhook_url: valid.alertWebhookUrl,
+    alert_on_recovery: valid.alertOnRecovery,
+    updated_at: new Date().toISOString()
+  };
+}
+
+async function readUserState(user) {
+  if (!supabaseEnabled || !user) {
+    return readState();
+  }
+
+  const [endpointRows, checkRows, incidentRows, settingRows] = await Promise.all([
+    supabaseRequest(`/rest/v1/endpoints?user_id=eq.${user.id}&select=*&order=created_at.desc`),
+    supabaseRequest(`/rest/v1/checks?user_id=eq.${user.id}&select=*&order=checked_at.desc&limit=1000`),
+    supabaseRequest(`/rest/v1/incidents?user_id=eq.${user.id}&select=*&order=started_at.desc`),
+    supabaseRequest(`/rest/v1/settings?user_id=eq.${user.id}&select=*&limit=1`)
+  ]);
+
+  const checksByEndpoint = new Map();
+
+  for (const check of checkRows || []) {
+    const list = checksByEndpoint.get(check.endpoint_id) || [];
+    list.push(check);
+    checksByEndpoint.set(check.endpoint_id, list);
+  }
+
+  return {
+    endpoints: (endpointRows || []).map((endpoint) =>
+      dbEndpointToApp(endpoint, (checksByEndpoint.get(endpoint.id) || []).reverse().slice(-100))
+    ),
+    incidents: (incidentRows || []).map(dbIncidentToApp),
+    settings: dbSettingsToApp(settingRows?.[0])
+  };
+}
+
+async function writeUserState(user, nextState) {
+  if (!supabaseEnabled || !user) {
+    writeState(nextState);
+    return readState();
+  }
+
+  const valid = validateState(nextState);
+
+  await supabaseRequest(`/rest/v1/endpoints?user_id=eq.${user.id}`, {
+    method: "DELETE"
+  });
+
+  if (valid.endpoints.length) {
+    await supabaseRequest("/rest/v1/endpoints", {
+      method: "POST",
+      prefer: "return=minimal",
+      body: JSON.stringify(valid.endpoints.map((endpoint) => appEndpointToDb(endpoint, user.id)))
+    });
+  }
+
+  if (valid.incidents.length) {
+    await supabaseRequest("/rest/v1/incidents", {
+      method: "POST",
+      prefer: "resolution=merge-duplicates,return=minimal",
+      body: JSON.stringify(valid.incidents.map((incident) => appIncidentToDb(incident, user.id)))
+    });
+  }
+
+  await supabaseRequest("/rest/v1/settings", {
+    method: "POST",
+    prefer: "resolution=merge-duplicates,return=minimal",
+    body: JSON.stringify(appSettingsToDb(valid.settings, user.id))
+  });
+
+  return readUserState(user);
+}
+
+async function appendCheck(user, endpoint, result) {
+  if (!supabaseEnabled || !user) {
+    endpoint.history = Array.isArray(endpoint.history) ? endpoint.history : [];
+    endpoint.history = endpoint.history.concat(result).slice(-100);
+    return;
+  }
+
+  await supabaseRequest("/rest/v1/checks", {
+    method: "POST",
+    prefer: "return=minimal",
+    body: JSON.stringify({
+      user_id: user.id,
+      endpoint_id: endpoint.id,
+      checked_at: result.checkedAt,
+      ok: result.ok,
+      latency: result.latency,
+      status: String(result.status),
+      validation_ok: Boolean(result.validationOk),
+      checked_by: result.checkedBy || "backend",
+      message: result.message || ""
+    })
+  });
+}
+
+async function persistUserIncidents(user, state) {
+  if (!supabaseEnabled || !user) {
+    writeState(state);
+    return;
+  }
+
+  await supabaseRequest(`/rest/v1/incidents?user_id=eq.${user.id}`, {
+    method: "DELETE"
+  });
+
+  if (state.incidents.length) {
+    await supabaseRequest("/rest/v1/incidents", {
+      method: "POST",
+      prefer: "return=minimal",
+      body: JSON.stringify(state.incidents.map((incident) => appIncidentToDb(incident, user.id)))
+    });
+  }
+}
+
 function validateResponseBody(endpoint, bodyText) {
   if (!endpoint.validationText) {
     return { ok: true, message: "" };
@@ -507,8 +839,8 @@ async function updateIncident(state, endpoint, result) {
   }
 }
 
-async function checkAndPersist(endpointId) {
-  const state = readState();
+async function checkAndPersist(endpointId, user = null) {
+  const state = await readUserState(user);
   const endpoint = state.endpoints.find((item) => item.id === endpointId);
 
   if (!endpoint) {
@@ -516,26 +848,47 @@ async function checkAndPersist(endpointId) {
   }
 
   const result = await runEndpointCheck(endpoint);
-  endpoint.history = Array.isArray(endpoint.history) ? endpoint.history : [];
-  endpoint.history = endpoint.history.concat(result).slice(-100);
+  await appendCheck(user, endpoint, result);
   await updateIncident(state, endpoint, result);
-  writeState(state);
+  await persistUserIncidents(user, state);
 
-  return { statusCode: 200, payload: { endpoint, result, state } };
+  return { statusCode: 200, payload: { endpoint, result, state: await readUserState(user) } };
 }
 
 async function handleApi(request, response, url) {
+  if (url.pathname === "/api/auth/config" && request.method === "GET") {
+    enforceRateLimit(request, "read");
+    sendJson(response, 200, { enabled: supabaseEnabled });
+    return;
+  }
+
+  if (url.pathname === "/api/auth/signup" && request.method === "POST") {
+    enforceRateLimit(request, "write");
+    const body = JSON.parse(await collectBody(request, DEFAULT_BODY_LIMIT_BYTES) || "{}");
+    sendJson(response, 200, await proxySupabaseAuth("/auth/v1/signup", body));
+    return;
+  }
+
+  if (url.pathname === "/api/auth/signin" && request.method === "POST") {
+    enforceRateLimit(request, "write");
+    const body = JSON.parse(await collectBody(request, DEFAULT_BODY_LIMIT_BYTES) || "{}");
+    sendJson(response, 200, await proxySupabaseAuth("/auth/v1/token?grant_type=password", body));
+    return;
+  }
+
   if (url.pathname === "/api/state" && request.method === "GET") {
     enforceRateLimit(request, "read");
-    sendJson(response, 200, readState());
+    const user = await verifyUser(request);
+    sendJson(response, 200, await readUserState(user));
     return;
   }
 
   if (url.pathname === "/api/state" && request.method === "PUT") {
     enforceRateLimit(request, "write");
+    const user = await verifyUser(request);
     const body = await collectBody(request, STATE_BODY_LIMIT_BYTES);
     const nextState = JSON.parse(body || "{}");
-    writeState({
+    const saved = await writeUserState(user, {
       ...DEFAULT_STATE,
       ...nextState,
       settings: {
@@ -543,23 +896,23 @@ async function handleApi(request, response, url) {
         ...(nextState.settings || {})
       }
     });
-    sendJson(response, 200, readState());
+    sendJson(response, 200, saved);
     return;
   }
 
   if (url.pathname === "/api/check-all" && request.method === "POST") {
     enforceRateLimit(request, "check");
-    const state = readState();
+    const user = await verifyUser(request);
+    const state = await readUserState(user);
 
     for (const endpoint of state.endpoints) {
       const result = await runEndpointCheck(endpoint);
-      endpoint.history = Array.isArray(endpoint.history) ? endpoint.history : [];
-      endpoint.history = endpoint.history.concat(result).slice(-100);
+      await appendCheck(user, endpoint, result);
       await updateIncident(state, endpoint, result);
     }
 
-    writeState(state);
-    sendJson(response, 200, state);
+    await persistUserIncidents(user, state);
+    sendJson(response, 200, await readUserState(user));
     return;
   }
 
@@ -567,12 +920,57 @@ async function handleApi(request, response, url) {
 
   if (checkMatch && request.method === "POST") {
     enforceRateLimit(request, "check");
-    const { statusCode, payload } = await checkAndPersist(decodeURIComponent(checkMatch[1]));
+    const user = await verifyUser(request);
+    const { statusCode, payload } = await checkAndPersist(decodeURIComponent(checkMatch[1]), user);
     sendJson(response, statusCode, payload);
     return;
   }
 
   sendJson(response, 404, { error: "API route not found." });
+}
+
+async function runScheduledChecks() {
+  if (supabaseEnabled) {
+    const endpointRows = await supabaseRequest("/rest/v1/endpoints?select=*");
+    const userIds = Array.from(new Set((endpointRows || []).map((endpoint) => endpoint.user_id)));
+
+    for (const userId of userIds) {
+      const user = { id: userId };
+      const userState = await readUserState(user);
+
+      for (const endpoint of userState.endpoints) {
+        const result = await runEndpointCheck(endpoint);
+        await appendCheck(user, endpoint, result);
+        await updateIncident(userState, endpoint, result);
+      }
+
+      await persistUserIncidents(user, userState);
+    }
+
+    return;
+  }
+
+  const state = readState();
+
+  for (const endpoint of state.endpoints) {
+    const result = await runEndpointCheck(endpoint);
+    await appendCheck(null, endpoint, result);
+    await updateIncident(state, endpoint, result);
+  }
+
+  writeState(state);
+}
+
+function startScheduler() {
+  if (!SCHEDULER_INTERVAL_MS || SCHEDULER_INTERVAL_MS < 10_000) {
+    return;
+  }
+
+  setInterval(() => {
+    runScheduledChecks().catch((error) => {
+      console.error("Scheduled check failed:", error.message);
+    });
+  }, SCHEDULER_INTERVAL_MS);
 }
 
 function serveStatic(response, pathname) {
@@ -615,5 +1013,6 @@ const server = http.createServer(async (request, response) => {
 
 server.listen(PORT, () => {
   ensureDataFile();
+  startScheduler();
   console.log(`PingVista running at http://127.0.0.1:${PORT}`);
 });

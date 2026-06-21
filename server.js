@@ -30,10 +30,17 @@ const PUBLIC_FILES = new Map([
   ["/", "index.html"],
   ["/index.html", "index.html"],
   ["/styles.css", "styles.css"],
-  ["/script.js", "script.js"]
+  ["/script.js", "script.js"],
+  ["/favicon.svg", "favicon.svg"],
+  ["/assets/pingvista-og.svg", "assets/pingvista-og.svg"],
+  ["/assets/pingvista-screenshot.svg", "assets/pingvista-screenshot.svg"],
+  ["/docs/FREE_DEPLOYMENT.md", "docs/FREE_DEPLOYMENT.md"],
+  ["/docs/SELF_HOSTING.md", "docs/SELF_HOSTING.md"]
 ]);
 
 const supabaseEnabled = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY && SUPABASE_SERVICE_ROLE_KEY);
+let schedulerStartedAt = null;
+let lastScheduledRunAt = null;
 
 const DEFAULT_STATE = {
   endpoints: [
@@ -856,6 +863,33 @@ async function checkAndPersist(endpointId, user = null) {
 }
 
 async function handleApi(request, response, url) {
+  if (url.pathname === "/api/health" && request.method === "GET") {
+    enforceRateLimit(request, "read");
+    sendJson(response, 200, {
+      status: "ok",
+      service: "PingVista",
+      version: "5.0.0",
+      uptimeSeconds: Math.round(process.uptime()),
+      storage: supabaseEnabled ? "supabase" : "local-json",
+      limits: {
+        maxEndpoints: MAX_ENDPOINTS,
+        maxChecksPerMinute: RATE_LIMITS.check.limit,
+        maxStateBodyBytes: STATE_BODY_LIMIT_BYTES,
+        maxEndpointBodyBytes: MAX_BODY_TEXT_LENGTH
+      },
+      scheduler: {
+        enabled: Boolean(SCHEDULER_INTERVAL_MS && SCHEDULER_INTERVAL_MS >= 10_000),
+        intervalMs: SCHEDULER_INTERVAL_MS,
+        startedAt: schedulerStartedAt,
+        lastRunAt: lastScheduledRunAt
+      },
+      supabase: {
+        enabled: supabaseEnabled
+      }
+    });
+    return;
+  }
+
   if (url.pathname === "/api/auth/config" && request.method === "GET") {
     enforceRateLimit(request, "read");
     sendJson(response, 200, { enabled: supabaseEnabled });
@@ -930,6 +964,8 @@ async function handleApi(request, response, url) {
 }
 
 async function runScheduledChecks() {
+  lastScheduledRunAt = new Date().toISOString();
+
   if (supabaseEnabled) {
     const endpointRows = await supabaseRequest("/rest/v1/endpoints?select=*");
     const userIds = Array.from(new Set((endpointRows || []).map((endpoint) => endpoint.user_id)));
@@ -966,6 +1002,7 @@ function startScheduler() {
     return;
   }
 
+  schedulerStartedAt = new Date().toISOString();
   setInterval(() => {
     runScheduledChecks().catch((error) => {
       console.error("Scheduled check failed:", error.message);
@@ -986,7 +1023,9 @@ function serveStatic(response, pathname) {
   const type = {
     ".html": "text/html;charset=utf-8",
     ".css": "text/css;charset=utf-8",
-    ".js": "application/javascript;charset=utf-8"
+    ".js": "application/javascript;charset=utf-8",
+    ".svg": "image/svg+xml;charset=utf-8",
+    ".md": "text/markdown;charset=utf-8"
   }[ext] || "text/plain;charset=utf-8";
 
   response.writeHead(200, { "Content-Type": type });

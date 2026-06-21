@@ -1,65 +1,61 @@
 # PingVista
 
-A lightweight API monitoring dashboard. Ping endpoints, track latency, validate responses, review incidents, and optionally run checks through a small Node backend.
+PingVista is an open-source API monitoring dashboard for developers. It helps you check endpoints, track latency, validate responses, review incidents, export reports, and optionally run checks through a small Node.js backend.
 
-## What Changed In Version 4
+![PingVista dashboard preview](assets/pingvista-screenshot.svg)
 
-Version 4 adds a backend mode while keeping the original frontend-only workflow available.
+## Current Status
 
-- Optional Node.js backend worker for server-side API checks
-- File-based JSON persistence in `data/pingvista-db.json`
-- Optional Supabase Auth and PostgreSQL persistence
-- Per-user endpoints, checks, incidents, and settings in Supabase mode
-- Backend scheduler for periodic saved endpoint checks
-- Backend check endpoints for single and bulk monitoring
-- Webhook alert support for down and recovery events
-- Dark mode
-- Runtime mode switch: browser-only or backend worker
-- Expanded reports with uptime, average latency, and backend-check counts
-- Project metadata through `package.json`
+PingVista is ready for local use, public demos, and self-hosted deployments. It can run as a browser-only tool for free, or with the Node backend for server-side checks, webhook alerts, health reporting, and optional Supabase Auth/PostgreSQL storage.
 
 ## Features
 
-- Manual endpoint checks
-- Automatic checks at fixed intervals
-- Endpoint groups for environments like Production, Staging, and Development
-- HTTP method support: `GET`, `POST`, `PUT`, `PATCH`, and `DELETE`
-- Custom request headers
-- JSON request body support for `POST`, `PUT`, and `PATCH`
-- Response validation using expected status code and optional body text matching
+- Demo mode with sample endpoints, latency history, and an example resolved incident
+- Manual checks for one endpoint or all endpoints
+- Browser-based automatic monitoring
+- Optional Node backend checks
+- Optional backend scheduler while the Node service is running
+- Optional Supabase Auth and PostgreSQL persistence
+- Per-user endpoints, checks, incidents, and settings in Supabase mode
+- Endpoint groups for Production, Staging, and Development
+- HTTP methods: `GET`, `POST`, `PUT`, `PATCH`, and `DELETE`
+- Custom headers and JSON request bodies
+- Expected status and response body validation
 - Latency charts built with SVG
-- Endpoint search and filtering by status or group
-- Local incident tracking with automatic open/resolve behavior
-- Optional webhook alerts in backend mode
-- Endpoint detail modal with recent check history
+- Uptime, status, latency, and incident summaries
+- Incident open/recovery tracking
+- Webhook alerts for incident and recovery events
+- Search and filters by status or group
 - CSV report export
-- JSON backup and import
-- Browser persistence with `localStorage`
-- Backend persistence with a local JSON file
+- JSON backup/import
+- Dark mode
+- Public deployment banner and clear free-hosting limitations
+- Backend health endpoint at `/api/health`
+- Security validation for public URL checks
+- Rate limits, endpoint limits, and request body limits
+- GitHub Actions CI for syntax and security tests
 
 ## Quick Start
 
-### Frontend-only mode
+### Browser-only mode
 
 Open `index.html` in a modern browser.
 
-This mode stores data in browser `localStorage` and runs checks from the browser.
+This mode is fully free. It stores data in `localStorage` and runs checks from the browser, so some APIs may fail because of CORS.
 
 ### Backend mode
-
-Run the included Node server:
 
 ```bash
 npm start
 ```
 
-Then visit:
+Then open:
 
 ```text
 http://127.0.0.1:4175
 ```
 
-Backend mode stores data in:
+Backend mode stores local data in:
 
 ```text
 data/pingvista-db.json
@@ -67,7 +63,10 @@ data/pingvista-db.json
 
 ### Supabase mode
 
-Create a Supabase project, run `supabase/schema.sql` in the SQL editor, then copy `.env.example` to `.env` and set:
+1. Create a Supabase project.
+2. Run `supabase/schema.sql` in the Supabase SQL editor.
+3. Copy `.env.example` to `.env`.
+4. Fill these values:
 
 ```env
 SUPABASE_URL=
@@ -76,117 +75,88 @@ SUPABASE_SERVICE_ROLE_KEY=
 SCHEDULER_INTERVAL_MS=300000
 ```
 
-When Supabase variables are present:
-
-- Users can sign up and sign in from the Settings tab.
-- Backend API routes require a valid Supabase session.
-- Endpoints, checks, incidents, and settings are stored per user.
-- Scheduled checks run from the backend while the Node server is running.
-
-## Demo Endpoints
-
-Try these public endpoints:
-
-```text
-https://api.github.com
-https://jsonplaceholder.typicode.com/posts
-```
-
-## Usage
-
-1. Add an endpoint with a name, URL, method, group, timeout, and validation rules.
-2. Choose browser-only mode or backend-worker mode in Settings.
-3. Click `Check` on one endpoint or `Check all` for every endpoint.
-4. Use auto monitoring to run checks repeatedly.
-5. Review latency, uptime, status code, validation result, and recent history.
-6. Check the Incidents tab to see failed checks and recovered endpoints.
-7. Export a CSV report or JSON backup when needed.
-
-## Dashboard Sections
-
-- **Overview**: Metrics, filters, auto monitoring, group summaries, and endpoint cards.
-- **Endpoints**: Endpoint configuration table with edit and detail actions.
-- **Incidents**: Open and resolved local incident history.
-- **Reports**: Summary cards for checks, failures, uptime, latency, incidents, groups, and validation coverage.
-- **Settings**: Runtime mode, dark mode, webhook alerts, JSON backup/import, and storage summary.
-
-## Webhook Alerts
-
-Webhook alerts work in backend mode. Add a webhook URL in Settings, then PingVista sends JSON events when:
-
-- An endpoint opens an incident
-- An endpoint recovers, if recovery alerts are enabled
-
-The backend sends payloads shaped like:
-
-```json
-{
-  "app": "PingVista",
-  "event": "down",
-  "incident": {
-    "endpointName": "GitHub API",
-    "status": "open"
-  }
-}
-```
-
-## Limitations
-
-- **Frontend-only mode still has CORS limits**: Some APIs may fail because browser requests are blocked by the target server.
-- **Backend mode is local-first**: It uses a JSON file, not a production database.
-- **No background daemon**: Checks run while the Node server and dashboard workflow are active.
-- **Single-user tool**: There is no authentication, team workspace, or permissions model.
-- **Webhook delivery is best-effort**: Failed alert delivery does not block monitoring.
-
-## Project Structure
-
-```text
-PingVista/
-├── data/
-│   └── .gitkeep
-├── supabase/
-│   └── schema.sql
-├── tests/
-│   ├── rate-limit.test.js
-│   └── security-validation.test.js
-├── .env.example
-├── index.html
-├── package.json
-├── script.js
-├── server.js
-├── styles.css
-└── README.md
-```
-
-## Tech Stack
-
-- HTML5
-- CSS3
-- Vanilla JavaScript
-- Node.js built-in `http` server
-- Browser and server `fetch()` APIs
-- `AbortController` for request timeouts
-- `localStorage` for browser mode
-- JSON file persistence for backend mode
-- Supabase Auth and PostgreSQL for deployment-ready mode
-- SVG for latency charts
+When these variables are present, PingVista stores endpoints, checks, incidents, and settings per signed-in user.
 
 ## Useful Commands
 
 ```bash
 npm start
 npm run check
+npm run test:security
 ```
 
-## Roadmap Ideas
+## Health Check
 
-- Replace JSON persistence with SQLite or PostgreSQL.
-- Add a true background scheduler in the backend.
-- Add email, Slack, Discord, or Telegram alert templates.
-- Add GitHub Pages, Render, Railway, or Vercel deployment.
-- Add screenshots or a short demo GIF.
-- Add authentication and shared team monitors.
+The backend exposes:
+
+```text
+GET /api/health
+```
+
+It returns service status, storage mode, scheduler status, Supabase availability, and active safety limits.
+
+## Free Deployment
+
+PingVista can be deployed for free as a public demo:
+
+- Frontend: GitHub Pages, Vercel Hobby, Netlify Free, or Render Static Site
+- Backend: optional Render/Railway free or trial service
+- Database/Auth: Supabase Free
+
+Read the full guide:
+
+```text
+docs/FREE_DEPLOYMENT.md
+```
+
+## Self-Hosting
+
+For real monitoring, self-host the backend so scheduled checks continue while your browser is closed.
+
+Read:
+
+```text
+docs/SELF_HOSTING.md
+```
+
+## Project Structure
+
+```text
+PingVista/
+├── .github/workflows/ci.yml
+├── assets/
+│   ├── pingvista-og.svg
+│   └── pingvista-screenshot.svg
+├── data/
+├── docs/
+│   ├── FREE_DEPLOYMENT.md
+│   └── SELF_HOSTING.md
+├── supabase/
+│   └── schema.sql
+├── tests/
+│   ├── rate-limit.test.js
+│   └── security-validation.test.js
+├── .env.example
+├── CONTRIBUTING.md
+├── LICENSE
+├── README.md
+├── ROADMAP.md
+├── SECURITY.md
+├── index.html
+├── package.json
+├── script.js
+├── server.js
+└── styles.css
+```
+
+## Limitations
+
+- Browser-only checks are affected by CORS.
+- Free hosting may sleep, pause, or limit background checks.
+- The backend scheduler only runs while the Node service is running.
+- Supabase credentials are required for real user-owned cloud persistence.
+- PingVista is not a replacement for enterprise observability platforms yet.
 
 ## License
 
-No license has been added yet.
+MIT License. See `LICENSE`.

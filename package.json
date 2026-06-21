@@ -1,7 +1,7 @@
 {
   "name": "pingvista",
-  "version": "4.0.0",
-  "description": "A lightweight API monitoring dashboard with optional backend checks and local persistence.",
+  "version": "5.0.0",
+  "description": "An open-source API monitoring dashboard with demo mode, backend checks, auth-ready storage, and public deployment guides.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -15,5 +15,5 @@
     "dashboard"
   ],
   "author": "",
-  "license": "UNLICENSED"
+  "license": "MIT"
 }

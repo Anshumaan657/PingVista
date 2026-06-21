@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#f4f7fb"/>
+  <rect x="70" y="70" width="1060" height="490" rx="18" fill="#ffffff" stroke="#dce4ef"/>
+  <text x="120" y="165" fill="#172033" font-family="Arial, sans-serif" font-size="76" font-weight="700">PingVista</text>
+  <text x="124" y="220" fill="#647085" font-family="Arial, sans-serif" font-size="28">Open-source API monitoring for developers</text>
+  <rect x="120" y="295" width="210" height="110" rx="12" fill="#eef3fa"/>
+  <rect x="370" y="295" width="210" height="110" rx="12" fill="#eef8f3"/>
+  <rect x="620" y="295" width="210" height="110" rx="12" fill="#fff6e8"/>
+  <rect x="870" y="295" width="210" height="110" rx="12" fill="#faeeee"/>
+  <text x="145" y="345" fill="#647085" font-family="Arial, sans-serif" font-size="22" font-weight="700">Tracked APIs</text>
+  <text x="145" y="385" fill="#172033" font-family="Arial, sans-serif" font-size="42" font-weight="700">2</text>
+  <text x="395" y="345" fill="#647085" font-family="Arial, sans-serif" font-size="22" font-weight="700">Healthy</text>
+  <text x="395" y="385" fill="#0f8a5f" font-family="Arial, sans-serif" font-size="42" font-weight="700">2</text>
+  <text x="645" y="345" fill="#647085" font-family="Arial, sans-serif" font-size="22" font-weight="700">Avg latency</text>
+  <text x="645" y="385" fill="#172033" font-family="Arial, sans-serif" font-size="42" font-weight="700">246 ms</text>
+  <text x="895" y="345" fill="#647085" font-family="Arial, sans-serif" font-size="22" font-weight="700">Incidents</text>
+  <text x="895" y="385" fill="#c93636" font-family="Arial, sans-serif" font-size="42" font-weight="700">0</text>
+  <path d="M125 475h80l45-85 65 125 54-82h96" fill="none" stroke="#2458d3" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="465" cy="433" r="11" fill="#0f8a5f"/>
+</svg>

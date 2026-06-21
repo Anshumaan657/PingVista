@@ -4,9 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PingVista</title>
+    <meta
+      name="description"
+      content="PingVista is an open-source API monitoring dashboard for endpoints, latency, incidents, and response validation."
+    />
+    <meta property="og:title" content="PingVista" />
+    <meta
+      property="og:description"
+      content="A self-hostable API monitoring dashboard for developers."
+    />
+    <meta property="og:image" content="assets/pingvista-og.svg" />
+    <meta property="og:type" content="website" />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
+    <div class="toast-region" id="toastRegion" aria-live="polite"></div>
     <main class="shell">
       <section class="hero">
         <div>
@@ -30,25 +43,37 @@
           <button class="secondary" id="resetButton" type="button">
             Reset demo
           </button>
+          <div class="theme-toggle" aria-label="Theme">
+            <button class="theme-option active" data-theme-option="light" type="button">
+              Light
+            </button>
+            <button class="theme-option" data-theme-option="dark" type="button">
+              Dark
+            </button>
+          </div>
         </div>
       </section>
 
       <section class="metrics" aria-label="API summary metrics">
         <article>
-          <span>Tracked APIs</span>
+          <span>Total endpoints</span>
           <strong id="metricTotal">0</strong>
+          <small>Configured monitors</small>
         </article>
         <article>
           <span>Healthy</span>
           <strong id="metricHealthy">0</strong>
+          <small>Passing latest check</small>
         </article>
         <article>
           <span>Avg latency</span>
           <strong id="metricLatency">--</strong>
+          <small>Successful checks</small>
         </article>
         <article>
           <span>Open incidents</span>
           <strong id="metricIncidents">0</strong>
+          <small>Needs attention</small>
         </article>
       </section>
 
@@ -315,6 +340,17 @@
             <strong id="backendStatus">Backend not checked</strong>
           </article>
           <article class="settings-card">
+            <h2>Backend health</h2>
+            <p>
+              Check whether the optional backend, scheduler, and Supabase
+              configuration are available in this deployment.
+            </p>
+            <button class="secondary" id="refreshHealthButton" type="button">
+              Refresh health
+            </button>
+            <strong id="healthSummary">Health not checked</strong>
+          </article>
+          <article class="settings-card">
             <h2>Theme</h2>
             <p>
               Switch between light and dark themes. The setting is saved with
@@ -357,6 +393,9 @@
               Import JSON
               <input id="importJsonInput" type="file" accept="application/json" />
             </label>
+            <button class="ghost" id="clearLocalDataButton" type="button">
+              Clear local data
+            </button>
           </article>
           <article class="settings-card">
             <h2>Local storage</h2>
@@ -366,6 +405,15 @@
               <code>data/pingvista-db.json</code>.
             </p>
             <strong id="storageSummary">--</strong>
+          </article>
+          <article class="settings-card">
+            <h2>Public safety limits</h2>
+            <p>
+              The backend blocks private/internal URLs, rejects non-HTTP URLs,
+              limits request bodies, caps endpoint count, and rate-limits API
+              checks for safer public demos.
+            </p>
+            <strong>50 endpoints · 30 checks/min · 100 KB endpoint body</strong>
           </article>
         </div>
       </section>
@@ -414,7 +462,13 @@
           <span class="rule-badge slow-rule"></span>
           <span class="rule-badge validation-rule"></span>
         </div>
-        <div class="chart" aria-label="Recent latency chart"></div>
+        <div class="chart-shell">
+          <div class="chart-topline">
+            <span>Latency trend</span>
+            <strong class="chart-scale">--</strong>
+          </div>
+          <div class="chart" aria-label="Recent latency chart"></div>
+        </div>
         <p class="message"></p>
         <div class="card-actions">
           <button class="secondary check-one" type="button">Check</button>

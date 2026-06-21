@@ -7,10 +7,11 @@ const DEFAULT_SLOW_THRESHOLD_MS = 900;
 const DEFAULT_EXPECTED_STATUS = 200;
 const DEFAULT_GROUPS = ["Production", "Staging", "Development"];
 const BODY_METHODS = ["POST", "PUT", "PATCH"];
+const MAX_ENDPOINTS = 50;
 
 const seedEndpoints = [
   {
-    id: crypto.randomUUID(),
+    id: "11111111-1111-4111-8111-111111111111",
     name: "GitHub API",
     url: "https://api.github.com",
     method: "GET",
@@ -24,7 +25,7 @@ const seedEndpoints = [
     history: []
   },
   {
-    id: crypto.randomUUID(),
+    id: "22222222-2222-4222-8222-222222222222",
     name: "JSONPlaceholder",
     url: "https://jsonplaceholder.typicode.com/posts",
     method: "GET",
@@ -58,6 +59,7 @@ const elements = {
   cancelEdit: document.querySelector("#cancelEditButton"),
   tabs: document.querySelectorAll(".tab"),
   panels: document.querySelectorAll(".tab-panel"),
+  themeOptions: document.querySelectorAll(".theme-option"),
   search: document.querySelector("#searchInput"),
   statusFilter: document.querySelector("#statusFilter"),
   groupFilter: document.querySelector("#groupFilter"),
@@ -80,10 +82,14 @@ const elements = {
   checkMode: document.querySelector("#checkMode"),
   syncBackend: document.querySelector("#syncBackendButton"),
   backendStatus: document.querySelector("#backendStatus"),
+  refreshHealth: document.querySelector("#refreshHealthButton"),
+  healthSummary: document.querySelector("#healthSummary"),
   theme: document.querySelector("#themeSelect"),
   alertWebhookUrl: document.querySelector("#alertWebhookUrl"),
   alertOnRecovery: document.querySelector("#alertOnRecovery"),
+  clearLocalData: document.querySelector("#clearLocalDataButton"),
   reset: document.querySelector("#resetButton"),
+  toastRegion: document.querySelector("#toastRegion"),
   monitorToggle: document.querySelector("#monitorToggle"),
   monitorInterval: document.querySelector("#monitorInterval"),
   monitoringStatus: document.querySelector("#monitoringStatus"),
@@ -109,6 +115,54 @@ let monitorTimer = null;
 let countdownTimer = null;
 let nextCheckAt = null;
 
+function demoCheck(minutesAgo, ok, latency, status, message, checkedBy = "demo") {
+  return {
+    checkedAt: new Date(Date.now() - minutesAgo * 60_000).toISOString(),
+    ok,
+    latency,
+    status,
+    validationOk: ok,
+    checkedBy,
+    message
+  };
+}
+
+function createDemoHistory(endpointName) {
+  if (endpointName === "GitHub API") {
+    return [
+      demoCheck(58, true, 182, 200, "Responded in 182 ms. Body matched \"current_user_url\"."),
+      demoCheck(44, true, 214, 200, "Responded in 214 ms. Body matched \"current_user_url\"."),
+      demoCheck(30, true, 268, 200, "Responded in 268 ms. Body matched \"current_user_url\"."),
+      demoCheck(16, true, 195, 200, "Responded in 195 ms. Body matched \"current_user_url\"."),
+      demoCheck(3, true, 231, 200, "Responded in 231 ms. Body matched \"current_user_url\".")
+    ];
+  }
+
+  return [
+    demoCheck(72, true, 345, 200, "Responded in 345 ms. Body matched \"userId\"."),
+    demoCheck(55, false, 5000, "ERR", "Timed out after 5 seconds."),
+    demoCheck(39, false, 940, 503, "Expected HTTP 200, got 503."),
+    demoCheck(24, true, 318, 200, "Responded in 318 ms. Body matched \"userId\"."),
+    demoCheck(8, true, 287, 200, "Responded in 287 ms. Body matched \"userId\".")
+  ];
+}
+
+function createDemoIncidents() {
+  return [
+    normalizeIncident({
+      id: "33333333-3333-4333-8333-333333333333",
+      endpointId: "22222222-2222-4222-8222-222222222222",
+      endpointName: "JSONPlaceholder",
+      group: "Staging",
+      status: "resolved",
+      startedAt: new Date(Date.now() - 55 * 60_000).toISOString(),
+      resolvedAt: new Date(Date.now() - 24 * 60_000).toISOString(),
+      message: "Recovered after 2 failed checks.",
+      checks: 2
+    })
+  ];
+}
+
 function syncStateRefs() {
   endpoints = state.endpoints;
   incidents = state.incidents;
@@ -116,8 +170,13 @@ function syncStateRefs() {
 
 function createSeedState() {
   return {
-    endpoints: seedEndpoints.map(normalizeEndpoint),
-    incidents: [],
+    endpoints: seedEndpoints.map((endpoint) =>
+      normalizeEndpoint({
+        ...endpoint,
+        history: createDemoHistory(endpoint.name)
+      })
+    ),
+    incidents: createDemoIncidents(),
     settings: {
       checkMode: "browser",
       theme: "light",
@@ -125,6 +184,31 @@ function createSeedState() {
       alertOnRecovery: true
     }
   };
+}
+
+function showToast(message, type = "info") {
+  if (!elements.toastRegion) return;
+
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+  toast.textContent = message;
+  elements.toastRegion.append(toast);
+  window.setTimeout(() => toast.remove(), 3600);
+}
+
+function setButtonBusy(button, isBusy, label = "Working...") {
+  if (!button) return;
+
+  if (isBusy) {
+    button.dataset.originalText = button.textContent;
+    button.textContent = label;
+    button.disabled = true;
+    return;
+  }
+
+  button.textContent = button.dataset.originalText || button.textContent;
+  button.disabled = false;
+  delete button.dataset.originalText;
 }
 
 function loadState() {
@@ -180,6 +264,9 @@ function normalizeSettings(settings = {}) {
 
 function applyTheme() {
   document.documentElement.dataset.theme = state.settings.theme;
+  elements.themeOptions.forEach((button) => {
+    button.classList.toggle("active", button.dataset.themeOption === state.settings.theme);
+  });
 }
 
 function syncSettingsControls() {
@@ -234,10 +321,12 @@ async function authRequest(mode) {
 
   if (!email || !password) {
     elements.authStatus.textContent = "Enter email and password";
+    showToast("Enter email and password.", "error");
     return;
   }
 
   try {
+    setButtonBusy(mode === "signin" ? elements.signIn : elements.signUp, true, "Please wait...");
     const response = await fetch(`/api/auth/${mode}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -254,6 +343,7 @@ async function authRequest(mode) {
 
     if (!authToken) {
       elements.authStatus.textContent = "Check your email to confirm signup";
+      showToast("Check your email to confirm signup.", "success");
       return;
     }
 
@@ -261,10 +351,14 @@ async function authRequest(mode) {
     localStorage.setItem(AUTH_EMAIL_KEY, authEmail);
     elements.authPassword.value = "";
     elements.authStatus.textContent = `Signed in as ${authEmail}`;
+    showToast(`Signed in as ${authEmail}.`, "success");
     await loadStateFromBackend();
     renderAll();
   } catch (error) {
     elements.authStatus.textContent = error.message;
+    showToast(error.message, "error");
+  } finally {
+    setButtonBusy(mode === "signin" ? elements.signIn : elements.signUp, false);
   }
 }
 
@@ -274,6 +368,7 @@ function signOut() {
   localStorage.removeItem(AUTH_TOKEN_KEY);
   localStorage.removeItem(AUTH_EMAIL_KEY);
   syncSettingsControls();
+  showToast("Signed out.", "info");
 }
 
 async function syncStateToBackend() {
@@ -297,8 +392,10 @@ async function syncStateToBackend() {
     }
 
     elements.backendStatus.textContent = "Backend synced";
+    showToast("Backend synced.", "success");
   } catch {
     elements.backendStatus.textContent = "Backend unavailable";
+    showToast("Backend unavailable. Browser mode still works.", "error");
   }
 }
 
@@ -328,10 +425,33 @@ async function loadStateFromBackend() {
     syncStateRefs();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     elements.backendStatus.textContent = "Backend connected";
+    checkBackendHealth();
     return true;
   } catch {
     elements.backendStatus.textContent = "Backend unavailable";
     return false;
+  }
+}
+
+async function checkBackendHealth() {
+  try {
+    setButtonBusy(elements.refreshHealth, true, "Checking...");
+    const response = await fetch("/api/health", { cache: "no-store" });
+
+    if (!response.ok) {
+      throw new Error("Backend health endpoint unavailable.");
+    }
+
+    const health = await response.json();
+    const database = health.supabase.enabled ? "Supabase" : "local JSON";
+    const scheduler = health.scheduler.enabled ? "scheduler on" : "scheduler off";
+    elements.healthSummary.textContent = `${health.status} · ${database} · ${scheduler}`;
+    return health;
+  } catch {
+    elements.healthSummary.textContent = "No backend detected. Static/browser deployment is active.";
+    return null;
+  } finally {
+    setButtonBusy(elements.refreshHealth, false);
   }
 }
 
@@ -456,6 +576,10 @@ function buildEndpointFromForm() {
   parseHeaders(elements.headers.value);
   validateBody(method, elements.body.value);
 
+  if (!elements.editingId.value && endpoints.length >= MAX_ENDPOINTS) {
+    throw new Error(`Free deployment safety limit reached: ${MAX_ENDPOINTS} endpoints maximum.`);
+  }
+
   return normalizeEndpoint({
     id: elements.editingId.value || crypto.randomUUID(),
     name: elements.name.value.trim(),
@@ -553,9 +677,15 @@ function renderGroups() {
 }
 
 function chartPoint(index, item, history, maxLatency) {
-  const x = history.length === 1 ? 50 : (index / (history.length - 1)) * 100;
+  const chartLeft = 8;
+  const chartRight = 112;
+  const chartTop = 12;
+  const chartBottom = 62;
+  const x = history.length === 1
+    ? (chartLeft + chartRight) / 2
+    : chartLeft + (index / (history.length - 1)) * (chartRight - chartLeft);
   const value = Math.min(item.latency || 0, maxLatency);
-  const y = 86 - (value / maxLatency) * 72;
+  const y = chartBottom - (value / maxLatency) * (chartBottom - chartTop);
   return { x, y };
 }
 
@@ -580,16 +710,16 @@ function renderChart(container, endpoint) {
   const linePath = points
     .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
     .join(" ");
-  const thresholdY = 86 - (Math.min(endpoint.slowThreshold, maxLatency) / maxLatency) * 72;
+  const thresholdY = 62 - (Math.min(endpoint.slowThreshold, maxLatency) / maxLatency) * 50;
 
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", "0 0 100 100");
+  svg.setAttribute("viewBox", "0 0 120 72");
   svg.setAttribute("preserveAspectRatio", "none");
   svg.classList.add("line-chart");
 
   const threshold = document.createElementNS("http://www.w3.org/2000/svg", "line");
-  threshold.setAttribute("x1", "0");
-  threshold.setAttribute("x2", "100");
+  threshold.setAttribute("x1", "8");
+  threshold.setAttribute("x2", "112");
   threshold.setAttribute("y1", thresholdY);
   threshold.setAttribute("y2", thresholdY);
   threshold.classList.add("threshold-line");
@@ -605,7 +735,7 @@ function renderChart(container, endpoint) {
     const marker = document.createElementNS("http://www.w3.org/2000/svg", "circle");
     marker.setAttribute("cx", point.x);
     marker.setAttribute("cy", point.y);
-    marker.setAttribute("r", "2.8");
+    marker.setAttribute("r", "2.3");
     marker.classList.add(result.ok ? "point-ok" : "point-down");
 
     const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
@@ -666,6 +796,9 @@ function renderEndpoints() {
       latest?.message || "Ready for the first check.";
 
     renderChart(node.querySelector(".chart"), endpoint);
+    node.querySelector(".chart-scale").textContent = latest
+      ? `max ${Math.round(Math.max(endpoint.slowThreshold, ...endpoint.history.map((item) => item.latency || 0)))} ms`
+      : `slow > ${endpoint.slowThreshold} ms`;
     elements.grid.append(node);
   });
 }
@@ -901,6 +1034,8 @@ async function checkEndpoint(id) {
 
   const card = document.querySelector(`[data-id="${id}"]`);
   card?.classList.add("is-checking");
+  const button = card?.querySelector(".check-one");
+  setButtonBusy(button, true, "Checking...");
 
   if (state.settings.checkMode === "backend") {
     try {
@@ -923,6 +1058,7 @@ async function checkEndpoint(id) {
       elements.backendStatus.textContent = "Backend check completed";
     } catch {
       elements.backendStatus.textContent = "Backend unavailable, used browser check";
+      showToast("Backend unavailable. Used browser check instead.", "info");
       const result = await pingEndpoint(endpoint);
       endpoint.history = endpoint.history.concat({ ...result, checkedBy: "browser" }).slice(HISTORY_LIMIT * -1);
       updateIncident(endpoint, result);
@@ -937,10 +1073,12 @@ async function checkEndpoint(id) {
 
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   renderAll();
+  setButtonBusy(button, false);
 }
 
 async function checkAllEndpoints() {
   elements.checkAll.classList.add("is-checking");
+  setButtonBusy(elements.checkAll, true, "Checking...");
 
   if (state.settings.checkMode === "backend") {
     try {
@@ -961,8 +1099,10 @@ async function checkAllEndpoints() {
       elements.backendStatus.textContent = "Backend check completed";
       elements.lastUpdated.textContent = `Last checked ${new Date().toLocaleTimeString()}`;
       renderAll();
+      showToast("Backend checks completed.", "success");
     } catch {
       elements.backendStatus.textContent = "Backend unavailable, used browser checks";
+      showToast("Backend unavailable. Running browser checks.", "info");
       await Promise.all(endpoints.map((endpoint) => checkEndpoint(endpoint.id)));
     }
   } else {
@@ -970,6 +1110,8 @@ async function checkAllEndpoints() {
   }
 
   elements.checkAll.classList.remove("is-checking");
+  setButtonBusy(elements.checkAll, false);
+  showToast("Checks completed.", "success");
 }
 
 function updateMonitoringStatus() {
@@ -1001,15 +1143,21 @@ function startMonitoring() {
   checkAllEndpoints();
   scheduleNextCheck();
   countdownTimer = window.setInterval(updateMonitoringStatus, 1000);
+  showToast("Auto monitoring started.", "success");
 }
 
 function stopMonitoring() {
+  const wasRunning = Boolean(monitorTimer);
   window.clearTimeout(monitorTimer);
   window.clearInterval(countdownTimer);
   monitorTimer = null;
   countdownTimer = null;
   nextCheckAt = null;
   updateMonitoringStatus();
+
+  if (wasRunning) {
+    showToast("Auto monitoring paused.", "info");
+  }
 }
 
 function setActiveTab(tabName) {
@@ -1197,8 +1345,9 @@ function importJson(file) {
       saveState();
       resetForm();
       renderAll();
+      showToast("JSON backup imported.", "success");
     } catch {
-      window.alert("That JSON file could not be imported.");
+      showToast("That JSON file could not be imported.", "error");
     }
   });
   reader.readAsText(file);
@@ -1221,8 +1370,10 @@ elements.form.addEventListener("submit", (event) => {
     saveState();
     resetForm();
     renderAll();
+    showToast(index === -1 ? "Endpoint added." : "Endpoint updated.", "success");
   } catch (error) {
     elements.formError.textContent = error.message;
+    showToast(error.message, "error");
   }
 });
 
@@ -1233,7 +1384,11 @@ elements.statusFilter.addEventListener("change", renderEndpoints);
 elements.groupFilter.addEventListener("change", renderEndpoints);
 elements.checkAll.addEventListener("click", checkAllEndpoints);
 elements.exportCsv.addEventListener("click", exportCsv);
-elements.exportJson.addEventListener("click", exportJson);
+elements.exportCsv.addEventListener("click", () => showToast("CSV report exported.", "success"));
+elements.exportJson.addEventListener("click", () => {
+  exportJson();
+  showToast("JSON backup exported.", "success");
+});
 elements.importJson.addEventListener("change", (event) => importJson(event.target.files[0]));
 elements.signIn.addEventListener("click", () => authRequest("signin"));
 elements.signUp.addEventListener("click", () => authRequest("signup"));
@@ -1252,6 +1407,13 @@ elements.theme.addEventListener("change", () => {
   state.settings.theme = elements.theme.value;
   saveState();
 });
+elements.themeOptions.forEach((button) => {
+  button.addEventListener("click", () => {
+    state.settings.theme = button.dataset.themeOption;
+    saveState();
+    renderAll();
+  });
+});
 elements.alertWebhookUrl.addEventListener("change", () => {
   state.settings.alertWebhookUrl = elements.alertWebhookUrl.value.trim();
   saveState();
@@ -1268,6 +1430,18 @@ elements.syncBackend.addEventListener("click", async () => {
   }
 
   renderAll();
+});
+elements.refreshHealth.addEventListener("click", checkBackendHealth);
+elements.clearLocalData.addEventListener("click", () => {
+  stopMonitoring();
+  localStorage.removeItem(STORAGE_KEY);
+  LEGACY_KEYS.forEach((key) => localStorage.removeItem(key));
+  state = { endpoints: [], incidents: [], settings: normalizeSettings() };
+  syncStateRefs();
+  resetForm();
+  renderAll();
+  elements.lastUpdated.textContent = "Local data cleared";
+  showToast("Local data cleared.", "info");
 });
 elements.monitorInterval.addEventListener("change", () => {
   if (monitorTimer) scheduleNextCheck();
@@ -1304,6 +1478,7 @@ elements.reset.addEventListener("click", () => {
   elements.lastUpdated.textContent = "Demo data reset";
   resetForm();
   renderAll();
+  showToast("Demo data restored.", "success");
 });
 
 elements.closeDetail.addEventListener("click", () => elements.detailModal.close());
@@ -1312,6 +1487,7 @@ resetForm();
 applyTheme();
 syncSettingsControls();
 checkAuthConfig();
+checkBackendHealth();
 loadStateFromBackend().then((connected) => {
   if (!connected && state.settings.checkMode === "backend") {
     state.settings.checkMode = "browser";

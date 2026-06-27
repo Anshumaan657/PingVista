@@ -8,6 +8,8 @@ Thanks for checking out PingVista.
 npm start
 ```
 
+This starts the Python backend with `python3 app.py`.
+
 Then open:
 
 ```text

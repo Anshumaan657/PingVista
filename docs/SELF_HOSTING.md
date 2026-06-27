@@ -4,14 +4,20 @@ Self-hosting is the best path when you want PingVista to behave like a real moni
 
 ## Requirements
 
-- Node.js 18 or newer
+- Python 3.10 or newer
 - A public HTTPS URL for the backend
-- Optional Supabase project for Auth and PostgreSQL
+- Optional Supabase project for Auth
 
 ## Local Backend
 
 ```bash
 npm start
+```
+
+This runs:
+
+```bash
+python3 app.py
 ```
 
 Open:

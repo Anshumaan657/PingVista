@@ -38,7 +38,7 @@ What is limited:
 
 Use this when you want backend checks and `/api/health`.
 
-1. Deploy the Node app to Render or Railway.
+1. Deploy the Python app to Render or Railway.
 2. Set `PORT` if the platform requires it.
 3. Keep Supabase variables empty for local JSON mode, or configure Supabase Free.
 4. Open the deployed backend URL.
@@ -77,5 +77,5 @@ PingVista currently uses these backend safety controls:
 ```text
 PingVista is a free, open-source API monitoring dashboard.
 The hosted demo is limited by free hosting. For reliable background checks,
-self-host the Node backend or connect a paid backend service.
+self-host the Python backend or connect a paid backend service.
 ```

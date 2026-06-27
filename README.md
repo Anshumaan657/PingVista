@@ -1,22 +1,21 @@
 # PingVista
 
-PingVista is an open-source API monitoring dashboard for developers. It helps you check endpoints, track latency, validate responses, review incidents, export reports, and optionally run checks through a small Node.js backend.
+PingVista is an open-source API monitoring dashboard for developers. It helps you check endpoints, track latency, validate responses, review incidents, export reports, and optionally run checks through a small Python backend.
 
 ![PingVista dashboard preview](assets/pingvista-screenshot.svg)
 
 ## Current Status
 
-PingVista is ready for local use, public demos, and self-hosted deployments. It can run as a browser-only tool for free, or with the Node backend for server-side checks, webhook alerts, health reporting, and optional Supabase Auth/PostgreSQL storage.
+PingVista is ready for local use, public demos, and self-hosted deployments. It can run as a browser-only tool for free, or with the Python backend for server-side checks, webhook alerts, health reporting, and optional Supabase Auth configuration.
 
 ## Features
 
 - Demo mode with sample endpoints, latency history, and an example resolved incident
 - Manual checks for one endpoint or all endpoints
 - Browser-based automatic monitoring
-- Optional Node backend checks
-- Optional backend scheduler while the Node service is running
-- Optional Supabase Auth and PostgreSQL persistence
-- Per-user endpoints, checks, incidents, and settings in Supabase mode
+- Optional Python backend checks
+- Optional backend scheduler while the Python service is running
+- Optional Supabase Auth configuration
 - Endpoint groups for Production, Staging, and Development
 - HTTP methods: `GET`, `POST`, `PUT`, `PATCH`, and `DELETE`
 - Custom headers and JSON request bodies
@@ -29,7 +28,6 @@ PingVista is ready for local use, public demos, and self-hosted deployments. It 
 - CSV report export
 - JSON backup/import
 - Dark mode
-- Public deployment banner and clear free-hosting limitations
 - Backend health endpoint at `/api/health`
 - Security validation for public URL checks
 - Rate limits, endpoint limits, and request body limits
@@ -75,7 +73,7 @@ SUPABASE_SERVICE_ROLE_KEY=
 SCHEDULER_INTERVAL_MS=300000
 ```
 
-When these variables are present, PingVista stores endpoints, checks, incidents, and settings per signed-in user.
+When these variables are present, PingVista can proxy Supabase sign-up and sign-in from the Settings tab. The Python backend keeps the no-cost local JSON persistence path as the default.
 
 ## Useful Commands
 
@@ -134,18 +132,17 @@ PingVista/
 ├── supabase/
 │   └── schema.sql
 ├── tests/
-│   ├── rate-limit.test.js
-│   └── security-validation.test.js
+│   └── python-backend.test.py
 ├── .env.example
 ├── CONTRIBUTING.md
 ├── LICENSE
 ├── README.md
 ├── ROADMAP.md
 ├── SECURITY.md
+├── app.py
 ├── index.html
 ├── package.json
 ├── script.js
-├── server.js
 └── styles.css
 ```
 
@@ -153,7 +150,7 @@ PingVista/
 
 - Browser-only checks are affected by CORS.
 - Free hosting may sleep, pause, or limit background checks.
-- The backend scheduler only runs while the Node service is running.
+- The backend scheduler only runs while the Python service is running.
 - Supabase credentials are required for real user-owned cloud persistence.
 - PingVista is not a replacement for enterprise observability platforms yet.
 

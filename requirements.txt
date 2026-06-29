@@ -1,0 +1,2 @@
+# PingVista currently uses the Python standard library for the backend.
+# Keep this file so Render/Railway/Python hosts detect the app correctly.

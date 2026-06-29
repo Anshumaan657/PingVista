@@ -67,6 +67,8 @@ data/pingvista-db.json
 4. Fill these values:
 
 ```env
+PORT=4175
+HOST=0.0.0.0
 SUPABASE_URL=
 SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
@@ -136,12 +138,18 @@ PingVista/
 ├── .env.example
 ├── CONTRIBUTING.md
 ├── LICENSE
+├── Procfile
 ├── README.md
 ├── ROADMAP.md
 ├── SECURITY.md
 ├── app.py
 ├── index.html
 ├── package.json
+├── render.yaml
+├── requirements.txt
+├── runtime.txt
+├── scripts/
+│   └── start.sh
 ├── script.js
 └── styles.css
 ```

@@ -39,9 +39,10 @@ What is limited:
 Use this when you want backend checks and `/api/health`.
 
 1. Deploy the Python app to Render or Railway.
-2. Set `PORT` if the platform requires it.
-3. Keep Supabase variables empty for local JSON mode, or configure Supabase Free.
-4. Open the deployed backend URL.
+2. Use the included `render.yaml`, `Procfile`, `requirements.txt`, and `runtime.txt`.
+3. Set `HOST=0.0.0.0`. Let the platform provide `PORT` when it does so automatically.
+4. Keep Supabase variables empty for local JSON mode, or configure Supabase Free.
+5. Open the deployed backend URL.
 
 Important note: free backend platforms may sleep. PingVista shows this clearly in the UI.
 

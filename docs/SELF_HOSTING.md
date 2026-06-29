@@ -30,6 +30,7 @@ http://127.0.0.1:4175
 
 ```env
 PORT=4175
+HOST=0.0.0.0
 SUPABASE_URL=
 SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
@@ -38,6 +39,8 @@ SCHEDULER_INTERVAL_MS=300000
 
 ## Deployment Notes
 
+- `Procfile`, `render.yaml`, `requirements.txt`, and `runtime.txt` are included for Python hosting.
+- Hosts usually provide `PORT`; set `HOST=0.0.0.0` for public deployments.
 - Keep `SUPABASE_SERVICE_ROLE_KEY` only on the backend.
 - Use HTTPS for public deployments.
 - Set `SCHEDULER_INTERVAL_MS` to at least `300000` for a free-friendly 5 minute interval.

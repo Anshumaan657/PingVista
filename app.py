@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib import error, parse, request
 
 
+HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "4175"))
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
@@ -779,9 +780,10 @@ class PingVistaHandler(BaseHTTPRequestHandler):
 def main():
     ensure_data_file()
     start_scheduler()
-    server = ThreadingHTTPServer(("127.0.0.1", PORT), PingVistaHandler)
+    server = ThreadingHTTPServer((HOST, PORT), PingVistaHandler)
     server.started_at = time.monotonic()
-    print(f"PingVista Python backend running at http://127.0.0.1:{PORT}")
+    display_host = "127.0.0.1" if HOST == "0.0.0.0" else HOST
+    print(f"PingVista Python backend running at http://{display_host}:{PORT}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

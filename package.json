@@ -6,7 +6,8 @@
   "scripts": {
     "start": "python3 app.py",
     "check": "python3 -m py_compile app.py && node --check script.js",
-    "test:security": "python3 tests/python-backend.test.py"
+    "test:security": "python3 tests/python-backend.test.py",
+    "deploy:check": "python3 scripts/verify_deployment.py"
   },
   "keywords": [
     "api-monitoring",

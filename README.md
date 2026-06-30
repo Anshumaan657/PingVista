@@ -8,6 +8,12 @@ PingVista is an open-source API monitoring dashboard for developers. It helps yo
 
 PingVista is ready for local use, public demos, and self-hosted deployments. It can run as a browser-only tool for free, or with the Python backend for server-side checks, webhook alerts, health reporting, and optional Supabase Auth configuration.
 
+## Try It Live
+
+Live demo: `Add your Render URL after Day 3 deployment`
+
+Free hosting may sleep after inactivity. If the app takes a few seconds to load, wait and refresh once.
+
 ## Features
 
 - Demo mode with sample endpoints, latency history, and an example resolved incident
@@ -83,6 +89,7 @@ When these variables are present, PingVista can proxy Supabase sign-up and sign-
 npm start
 npm run check
 npm run test:security
+npm run deploy:check
 ```
 
 ## Health Check
@@ -107,6 +114,7 @@ Read the full guide:
 
 ```text
 docs/FREE_DEPLOYMENT.md
+docs/DAY3_PUBLIC_DEPLOYMENT.md
 ```
 
 ## Self-Hosting
@@ -130,6 +138,7 @@ PingVista/
 ├── data/
 ├── docs/
 │   ├── FREE_DEPLOYMENT.md
+│   ├── DAY3_PUBLIC_DEPLOYMENT.md
 │   └── SELF_HOSTING.md
 ├── supabase/
 │   └── schema.sql
@@ -149,7 +158,8 @@ PingVista/
 ├── requirements.txt
 ├── runtime.txt
 ├── scripts/
-│   └── start.sh
+│   ├── start.sh
+│   └── verify_deployment.py
 ├── script.js
 └── styles.css
 ```

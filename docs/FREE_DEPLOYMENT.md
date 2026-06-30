@@ -43,8 +43,15 @@ Use this when you want backend checks and `/api/health`.
 3. Set `HOST=0.0.0.0`. Let the platform provide `PORT` when it does so automatically.
 4. Keep Supabase variables empty for local JSON mode, or configure Supabase Free.
 5. Open the deployed backend URL.
+6. Run `npm run deploy:check` with `PINGVISTA_DEPLOYMENT_URL` set to the live URL.
 
 Important note: free backend platforms may sleep. PingVista shows this clearly in the UI.
+
+For the exact Day 3 deployment checklist, read:
+
+```text
+docs/DAY3_PUBLIC_DEPLOYMENT.md
+```
 
 ## Option C: Supabase Free
 
